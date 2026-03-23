@@ -7,7 +7,7 @@
 [![Python](https://img.shields.io/badge/Python-3.9+-blue.svg)](https://www.python.org/)
 [![License](https://img.shields.io/badge/License-AGPL--3.0-blue.svg)](LICENSE)
 [![License: Commercial](https://img.shields.io/badge/License-Commercial--Available-red)](licenses/LICENSE-COMMERCIAL.md)
-[![Version](https://img.shields.io/badge/Version-2.9.0-orange.svg)](#)
+[![Version](https://img.shields.io/badge/Version-2.10.0-orange.svg)](#)
 [![PyPI](https://img.shields.io/pypi/v/simtradelab.svg)](https://pypi.org/project/simtradelab/)
 [![PyPI - Downloads](https://img.shields.io/pypi/dm/simtradelab.svg)](https://pypi.org/project/simtradelab/)
 
@@ -108,6 +108,9 @@ config = BacktestConfig(
     # --- 沙箱与国际化 ---
     # sandbox=True,                    # PTrade沙箱模式: 限制import和内置函数
     # locale='auto',                   # 日志语言: 'zh' | 'en' | 'de'（自动：CN市场→zh，其他→系统语言）
+
+    # --- 入口文件 ---
+    # strategy_file='backtest.py',     # 入口文件: 'backtest.py' | 'live.py'
 )
 runner = BacktestRunner()
 report = runner.run(config=config)

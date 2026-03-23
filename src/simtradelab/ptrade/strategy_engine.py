@@ -406,6 +406,8 @@ class StrategyExecutionEngine:
                 data = Data(minute_dt, self.context.portfolio._bt_ctx)
                 if not self._safe_call('handle_data', LifecyclePhase.HANDLE_DATA, data):
                     return False
+                # 触发订单/成交回调（实盘模拟）
+                self._fire_callbacks()
                 # 在匹配的分钟bar执行run_daily任务
                 hhmm = f'{minute_dt.hour:02d}:{minute_dt.minute:02d}'
                 if hhmm in daily_task_times:
@@ -457,6 +459,28 @@ class StrategyExecutionEngine:
         base = trade_date.normalize()
         return [base + offset for offset in self._get_minute_offsets()]
 
+    def _fire_callbacks(self) -> None:
+        """触发 on_order_response / on_trade_response 回调（实盘模拟）"""
+        from simtradelab.ptrade.lifecycle_controller import LifecyclePhase
+
+        order_callbacks = self.api.flush_order_callbacks()
+        if order_callbacks and 'on_order_response' in self._strategy_functions:
+            self.lifecycle_controller.set_phase(LifecyclePhase.ON_ORDER_RESPONSE)
+            try:
+                self._strategy_functions['on_order_response'](self.context, order_callbacks)
+            except Exception as e:
+                self.log.error(t("engine.func_failed", func='on_order_response', error=e))
+                traceback.print_exc()
+
+        trade_callbacks = self.api.flush_trade_callbacks()
+        if trade_callbacks and 'on_trade_response' in self._strategy_functions:
+            self.lifecycle_controller.set_phase(LifecyclePhase.ON_TRADE_RESPONSE)
+            try:
+                self._strategy_functions['on_trade_response'](self.context, trade_callbacks)
+            except Exception as e:
+                self.log.error(t("engine.func_failed", func='on_trade_response', error=e))
+                traceback.print_exc()
+
     def _execute_daily_tasks(self) -> None:
         """执行所有 run_daily 注册的任务（日频模式：忽略time参数，全部执行）"""
         for func, _ in self.api._daily_tasks:
@@ -498,6 +522,9 @@ class StrategyExecutionEngine:
         # handle_data
         if not self._safe_call('handle_data', LifecyclePhase.HANDLE_DATA, data):
             return False
+
+        # 触发订单/成交回调（实盘模拟）
+        self._fire_callbacks()
 
         # after_trading_end（允许失败）
         self._safe_call('after_trading_end', LifecyclePhase.AFTER_TRADING_END, data, allow_fail=True)

@@ -168,6 +168,10 @@ class PtradeAPI:
         self._history_cache: dict = cache_manager.get_namespace('history')._cache  # 使用LRUCache
         self._fundamentals_cache = LRUCache(maxsize=500)
 
+        # 实盘模拟: 订单/成交回调队列
+        self._pending_order_callbacks: list[dict] = []
+        self._pending_trade_callbacks: list[dict] = []
+
     @property
     def order_processor(self) -> OrderProcessor:
         """获取订单处理器（延迟初始化）"""
@@ -1250,7 +1254,7 @@ class PtradeAPI:
         return -rounded
 
     def _submit_order(self, security: str, amount: int, price: float) -> Optional[str]:
-        """创建订单→注册blotter→执行→更新状态。返回 order_id 或 None。"""
+        """创建订单→注册blotter→执行→更新状态→收集回调。返回 order_id 或 None。"""
         order_id, order = self.order_processor.create_order(security, amount, price)
         if self.context and self.context.blotter:
             self.context.blotter.all_orders.append(order)
@@ -1268,7 +1272,37 @@ class PtradeAPI:
             if self.context and self.context.blotter:
                 self.context.blotter.filled_orders.append(order)
 
-        return order.id if success else None
+        # 收集 on_order_response 回调数据（ptrade 实盘格式）
+        self._pending_order_callbacks.append({
+            'entrust_no': order.entrust_no or order_id[:6],
+            'error_info': '' if success else '委托失败',
+            'order_time': str(self.context.current_dt),
+            'stock_code': security,
+            'amount': abs(amount),
+            'price': float(price),
+            'business_amount': float(abs(amount)) if success else 0.0,
+            'status': '8' if success else '9',
+            'entrust_type': '0',
+            'entrust_prop': '0',
+            'order_id': order_id,
+        })
+
+        # 收集 on_trade_response 回调数据（仅成功时）
+        if success:
+            self._pending_trade_callbacks.append({
+                'entrust_no': order.entrust_no or order_id[:6],
+                'business_time': str(self.context.current_dt),
+                'stock_code': security,
+                'entrust_bs': '1' if amount > 0 else '2',
+                'business_amount': float(abs(amount)),
+                'business_price': float(price),
+                'business_balance': float(abs(amount) * price),
+                'business_id': order_id[:8],
+                'status': '0',
+                'order_id': order_id,
+            })
+
+        return order_id if success else None
 
     @validate_lifecycle
     def order(self, security: str, amount: int, limit_price: float = None) -> Optional[str]:
@@ -1512,6 +1546,18 @@ class PtradeAPI:
         if self.context and self.context.blotter:
             return self.context.blotter.cancel_order(order)
         return False
+
+    def flush_order_callbacks(self) -> list[dict]:
+        """取出并清空待处理的订单回调数据"""
+        callbacks = self._pending_order_callbacks
+        self._pending_order_callbacks = []
+        return callbacks
+
+    def flush_trade_callbacks(self) -> list[dict]:
+        """取出并清空待处理的成交回调数据"""
+        callbacks = self._pending_trade_callbacks
+        self._pending_trade_callbacks = []
+        return callbacks
 
     # ==================== 配置API ====================
 

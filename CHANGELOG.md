@@ -5,6 +5,22 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.10.0] - 2026-03-23
+
+### ✨ Added
+
+- **backtest** — Multi-entry file support: `BacktestConfig.strategy_file` defaults to `backtest.py`, can be set to `live.py` for live-simulation mode
+- **backtest** — `_file_prefix` property for log/chart filenames that adapt to the entry file (e.g. `live_*.json`)
+- **ptrade** — `on_order_response` / `on_trade_response` callback simulation for live-mode strategies
+
+### 📦 Upgrade
+
+```bash
+pip install --upgrade simtradelab==2.10.0
+```
+
+---
+
 ## [2.9.0] - 2026-03-20
 
 ### ✨ Added
