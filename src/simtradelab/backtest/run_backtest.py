@@ -14,6 +14,7 @@
 
 import sys
 import argparse
+from pathlib import Path
 
 # 确保控制台 UTF-8 编码和实时输出（兼容 Windows）
 sys.stdout.reconfigure(encoding="utf-8", line_buffering=True)
@@ -21,6 +22,7 @@ sys.stderr.reconfigure(encoding="utf-8")
 
 from simtradelab.backtest.runner import BacktestRunner
 from simtradelab.backtest.config import BacktestConfig
+from simtradelab.utils.paths import get_data_path
 
 # ==================== 命令行参数配置 ====================
 # 示例用法:
@@ -64,13 +66,20 @@ if __name__ == "__main__":
 
     # ==================== 启动回测 ====================
 
+    # 使用相对路径获取数据目录（跨平台兼容 Windows/macOS/Linux）
+    # 优先级：
+    # 1. 环境变量 SIMTRADELAB_DATA_PATH（如果设置）
+    # 2. 项目根目录下的 data 目录（自动查找）
+    # 3. 默认值：当前文件上级目录的 data 文件夹
+    data_path = get_data_path()
+
     # 创建配置
     config = BacktestConfig(
         strategy_name=args.strategy,
         start_date=args.start,
         end_date=args.end,
         initial_capital=args.capital,
-        data_path="/Users/jackie.liu/SynologyDrive/PtradeProjects/SimTradeLab/data",
+        data_path=str(data_path),
     )
 
     # 运行回测
