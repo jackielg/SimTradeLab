@@ -219,6 +219,15 @@ class BacktestRunner:
             config: 回测配置
         """
         import sys
+        from simtradelab.ptrade.strategy_engine import _current_backtest_date
+
+        class BacktestTimeFormatter(logging.Formatter):
+            """自定义日志格式化器：使用回测时间而非实际时间"""
+            def format(self, record):
+                from simtradelab.ptrade.strategy_engine import _current_backtest_date
+                bt_time = _current_backtest_date or '0000-00-00 00:00:00'
+                record.backtest_time = bt_time
+                return super().format(record)
 
         handlers = [logging.StreamHandler(sys.stdout)]
 
@@ -231,9 +240,11 @@ class BacktestRunner:
         if config.enable_charts:
             self._chart_filename = config.get_chart_filename()
 
+        for handler in handlers:
+            handler.setFormatter(BacktestTimeFormatter('%(backtest_time)s - %(levelname)s - %(message)s'))
+
         logging.basicConfig(
             level=logging.INFO,
-            format='[%(levelname)s] %(message)s',
             handlers=handlers,
             force=True
         )
