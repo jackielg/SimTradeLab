@@ -32,7 +32,7 @@ ERRORS=0
 WARNINGS=0
 
 # ========================================
-# 0. 检查暂存区无价值文件（新增！）
+# 0. 检查暂存区无价值文件（强制清理！）
 # ========================================
 echo "0️⃣  检查 GitHub 暂存区无价值文件..."
 echo ""
@@ -45,37 +45,79 @@ if [ -n "$STAGED_FILES" ]; then
     echo "$STAGED_FILES"
     echo ""
     
-    # 检查临时调试脚本
+    # 检查临时调试脚本（强制清理）
     TEMP_SCRIPTS=$(echo "$STAGED_FILES" | grep -E "^check_.*\.py$|^test_.*\.py$" | grep -v "^tests/")
     if [ -n "$TEMP_SCRIPTS" ]; then
-        echo "⚠️  发现临时调试脚本（建议从暂存区移除）："
+        echo "❌ 发现临时调试脚本（必须从暂存区移除并删除）："
         echo "$TEMP_SCRIPTS"
         echo ""
-        echo "💡 处理方法："
-        echo "   git reset HEAD {文件路径}"
-        echo "   rm {文件路径}"
+        echo "💡 临时脚本应放在 SimTradeLab/tasks/ 目录，用完即删"
         echo ""
-        WARNINGS=$((WARNINGS + 1))
+        
+        # 自动从暂存区移除
+        for FILE in $TEMP_SCRIPTS; do
+            git reset HEAD "$FILE" 2>/dev/null
+            echo "✅ 已从暂存区移除：$FILE"
+        done
+        
+        ERRORS=$((ERRORS + 1))
     fi
     
-    # 检查空文件
+    # 检查空文件（强制清理）
+    EMPTY_FILES=""
     for FILE in $STAGED_FILES; do
         if [ -f "$FILE" ]; then
             LINE_COUNT=$(wc -l < "$FILE" | tr -d ' ')
             if [ "$LINE_COUNT" -eq 0 ]; then
-                echo "⚠️  发现空文件：$FILE"
-                WARNINGS=$((WARNINGS + 1))
+                EMPTY_FILES="$EMPTY_FILES $FILE"
+                echo "❌ 发现空文件：$FILE"
             fi
         fi
     done
     
-    # 检查路径不规范（大小写问题）
+    if [ -n "$EMPTY_FILES" ]; then
+        echo ""
+        echo "💡 空文件必须删除"
+        for FILE in $EMPTY_FILES; do
+            git reset HEAD "$FILE" 2>/dev/null
+            rm -f "$FILE"
+            echo "✅ 已删除：$FILE"
+        done
+        ERRORS=$((ERRORS + 1))
+    fi
+    
+    # 检查路径不规范（强制清理）
     PATH_ISSUES=$(echo "$STAGED_FILES" | grep -i "^simtradelab/" | grep -v "^SimTradeLab/")
     if [ -n "$PATH_ISSUES" ]; then
-        echo "⚠️  发现路径大小写不规范（应使用 SimTradeLab/）："
+        echo ""
+        echo "❌ 发现路径大小写不规范（必须从暂存区移除）："
         echo "$PATH_ISSUES"
         echo ""
-        WARNINGS=$((WARNINGS + 1))
+        
+        for FILE in $PATH_ISSUES; do
+            git reset HEAD "$FILE" 2>/dev/null
+            echo "✅ 已从暂存区移除：$FILE"
+        done
+        
+        ERRORS=$((ERRORS + 1))
+    fi
+    
+    # 检查一次性 MD 文档（强制清理）
+    ONE_TIME_DOCS=$(echo "$STAGED_FILES" | grep -E "cleanup_.*\.md$|fix_report_.*\.md$|improvement_.*\.md$" | grep -v "^strategies/.*/docs/")
+    if [ -n "$ONE_TIME_DOCS" ]; then
+        echo ""
+        echo "❌ 发现一次性文档（必须从暂存区移除）："
+        echo "$ONE_TIME_DOCS"
+        echo ""
+        echo "💡 文档应保存在 strategies/{策略名}/docs/ 目录"
+        echo ""
+        
+        for FILE in $ONE_TIME_DOCS; do
+            git reset HEAD "$FILE" 2>/dev/null
+            echo "✅ 已从暂存区移除：$FILE"
+        done
+        
+        ERRORS=$((ERRORS + 1))
     fi
     
     echo ""
