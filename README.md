@@ -1,13 +1,13 @@
 # 📈 SimTradeLab
 
-English | [中文](README.zh-CN.md)
+English | [中文](README.zh-CN.md) | [Deutsch](README.de.md)
 
 **Lightweight Quantitative Backtesting Framework — Local PTrade API Simulation**
 
 [![Python](https://img.shields.io/badge/Python-3.9+-blue.svg)](https://www.python.org/)
 [![License](https://img.shields.io/badge/License-AGPL--3.0-blue.svg)](LICENSE)
 [![License: Commercial](https://img.shields.io/badge/License-Commercial--Available-red)](licenses/LICENSE-COMMERCIAL.md)
-[![Version](https://img.shields.io/badge/Version-2.7.0-orange.svg)](#)
+[![Version](https://img.shields.io/badge/Version-2.10.0-orange.svg)](#)
 [![PyPI](https://img.shields.io/pypi/v/simtradelab.svg)](https://pypi.org/project/simtradelab/)
 [![PyPI - Downloads](https://img.shields.io/pypi/dm/simtradelab.svg)](https://pypi.org/project/simtradelab/)
 
@@ -34,7 +34,8 @@ English | [中文](README.zh-CN.md)
 - 🧠 **Smart data loading** — AST analysis of strategy code, loads only required data
 - 🔧 **Lifecycle control** — 7 lifecycle phases, strict simulation of PTrade's API restrictions
 - 📊 **Full stats reporting** — returns, risk metrics (Sharpe/Sortino/Calmar), trade details, FIFO dividend tax, CSV export
-- 🔌 **T+0 / T+1 modes** — configurable trading restrictions for A-shares, ETFs, and US stocks
+- 🔌 **Multi-market** — Built-in CN (A-shares) and US market profiles with automatic trading rule adaptation
+- 🌐 **i18n** — Backtest output in Chinese, English, or German
 
 ---
 
@@ -67,7 +68,7 @@ pip install simtradelab[indicators]
 pip install simtradelab[optimizer]
 ```
 
-**Data:** Use [SimTradeData](https://github.com/kay-ou/SimTradeData) to download China A-share historical data.
+**Data:** Use [SimTradeData](https://github.com/kay-ou/SimTradeData) to download China A-share and US stock historical data.
 
 **Run a backtest:**
 
@@ -76,9 +77,40 @@ from simtradelab.backtest.runner import BacktestRunner
 from simtradelab.backtest.config import BacktestConfig
 
 config = BacktestConfig(
-    strategy_name='my_strategy',
-    start_date='2024-01-01',
-    end_date='2024-12-31',
+    # --- Required ---
+    strategy_name='my_strategy',       # Strategy folder name under strategies/
+    start_date='2024-01-01',           # Backtest start date
+    end_date='2024-12-31',             # Backtest end date
+
+    # --- Capital & Market ---
+    # initial_capital=100000.0,        # Starting capital (must be > 0)
+    # market='CN',                     # Market: 'CN' (A-shares) | 'US'
+    # t_plus_1=None,                   # T+1 override: None=market default (CN=True, US=False)
+    # benchmark_code='',               # Benchmark code, empty=market default
+
+    # --- Frequency ---
+    # frequency='1d',                  # Bar frequency: '1d' (daily) | '1m' (minute)
+
+    # --- Paths ---
+    # data_path='~/.simtradelab/data', # Market data directory
+    # strategies_path='./strategies',  # Strategies root directory
+
+    # --- Performance ---
+    # enable_multiprocessing=True,     # Enable parallel data loading
+    # num_workers=None,                # Worker count (None=auto, must be >= 1)
+    # use_data_server=True,            # Use in-memory data server (singleton)
+
+    # --- Output ---
+    # enable_charts=True,              # Generate PNG chart
+    # enable_logging=True,             # Write log file
+    # enable_export=False,             # Export trade details to CSV
+
+    # --- Sandbox & i18n ---
+    # sandbox=True,                    # PTrade sandbox: restrict imports & builtins
+    # locale='auto',                   # Log language: 'zh' | 'en' | 'de' (auto: CN market→zh, else system locale)
+
+    # --- Entry file ---
+    # strategy_file='backtest.py',     # Entry file: 'backtest.py' | 'live.py'
 )
 runner = BacktestRunner()
 report = runner.run(config=config)

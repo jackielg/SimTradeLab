@@ -20,6 +20,7 @@ import pandas as pd
 
 from .config_manager import config
 from .object import Order
+from simtradelab.i18n import t
 
 
 class OrderProcessor:
@@ -32,7 +33,7 @@ class OrderProcessor:
     4. 买卖执行
     """
 
-    def __init__(self, context, data_context, get_stock_date_index_func, log):
+    def __init__(self, context, data_context, get_stock_date_index_func, log, stats_collector=None):
         """初始化订单处理器
 
         Args:
@@ -40,11 +41,14 @@ class OrderProcessor:
             data_context: 数据上下文对象
             get_stock_date_index_func: 获取股票日期索引的函数
             log: 日志对象
+            stats_collector: 统计收集器（可选）
         """
         self.context = context
         self.data_context = data_context
         self.get_stock_date_index = get_stock_date_index_func
         self.log = log
+        self.stats_collector = stats_collector
+        self.lot_size = 100
 
     def get_execution_price(self, stock: str, limit_price: Optional[float] = None, is_buy: bool = True) -> Optional[float]:
         """获取交易执行价格（含滑点）
@@ -68,7 +72,7 @@ class OrderProcessor:
                 data_source = self.data_context.stock_data_dict
 
             if stock not in data_source:
-                self.log.warning("get_execution_price 失败 | %s 不在数据源中", stock)
+                self.log.warning(t("order.price_no_data", stock=stock))
                 return None
 
             stock_df = data_source[stock]
@@ -92,17 +96,17 @@ class OrderProcessor:
                 # 成交量检查：volume=0 表示停牌，Ptrade会拒绝订单
                 volume = stock_df['volume'].values[idx]
                 if volume == 0:
-                    self.log.warning("订单撤销:  当前bar交易量不足  %s  bar.volume 0.0", stock)
+                    self.log.warning(t("order.volume_zero", stock=stock))
                     return None
 
                 price = stock_df['close'].values[idx]
                 base_price = float(price)
 
                 if pd.isna(base_price) or base_price <= 0:
-                    self.log.warning("get_execution_price 失败 | %s 价格异常: %s", stock, base_price)
+                    self.log.warning(t("order.price_abnormal", stock=stock, price=base_price))
                     return None
             except Exception as e:
-                self.log.warning("get_execution_price 异常 | %s: %s", stock, e)
+                self.log.warning(t("order.price_error", stock=stock, error=e))
                 return None
 
         # 获取滑点配置
@@ -205,8 +209,9 @@ class OrderProcessor:
         if total_cost > self.context.portfolio._cash:
             daily_commission = getattr(self.context, '_daily_buy_commission', 0.0)
             if cost > self.context.portfolio._cash + daily_commission:
-                self.log.warning(f"【买入失败】{stock} | 原因: 现金不足 (需要{total_cost:.2f}, 可用{self.context.portfolio._cash:.2f})")
+                self.log.warning(t("order.buy_no_cash", stock=stock, cost="{:.2f}".format(total_cost), cash="{:.2f}".format(self.context.portfolio._cash)))
                 return False
+            # 手续费导致的微负：Ptrade允许（当日已付手续费不计入后续订单可用现金）
 
         self.context.portfolio._cash -= total_cost
 
@@ -223,6 +228,11 @@ class OrderProcessor:
         # 累计当日买入金额（gross，不含手续费）
         self.context._daily_buy_total += amount * price
 
+        if self.stats_collector:
+            self.stats_collector.collect_trade(
+                self.context.current_dt, stock, "buy", amount, price, amount * price, commission
+            )
+
         return True
 
     def execute_sell(self, stock: str, amount: int, price: float) -> bool:
@@ -237,7 +247,7 @@ class OrderProcessor:
             是否成功
         """
         if stock not in self.context.portfolio.positions:
-            self.log.warning(f"【卖出失败】{stock} | 原因: 无持仓")
+            self.log.warning(t("order.sell_no_position", stock=stock))
             return False
 
         position = self.context.portfolio.positions[stock]
@@ -245,19 +255,19 @@ class OrderProcessor:
         # T+1限制：只能卖出 enable_amount（前日持仓）
         if self.context.t_plus_1:
             if position.enable_amount <= 0:
-                self.log.warning(f"【卖出失败】{stock} | 原因: T+1限制，当日买入不可卖出")
+                self.log.warning(t("order.sell_t1_limit", stock=stock))
                 return False
 
             if amount > position.enable_amount:
                 # 截断到可卖数量（整手）
-                available = (position.enable_amount // 100) * 100
+                available = (position.enable_amount // self.lot_size) * self.lot_size
                 if available <= 0:
                     available = position.enable_amount  # 零股全出
-                self.log.info(f"T+1截断: {stock} 卖出 {amount} → {available} 股")
+                self.log.info(t("order.t1_truncate", stock=stock, amount=amount, available=available))
                 amount = available
 
         if position.amount < amount:
-            self.log.warning(f"【卖出失败】{stock} | 原因: 持仓不足 (持有{position.amount}, 尝试卖出{amount})")
+            self.log.warning(t("order.sell_insufficient", stock=stock, held=position.amount, amount=amount))
             return False
 
         # 计算手续费
@@ -288,11 +298,16 @@ class OrderProcessor:
         # 累计当日卖出金额（gross，不含手续费）
         self.context._daily_sell_total += amount * price
 
+        if self.stats_collector:
+            self.stats_collector.collect_trade(
+                self.context.current_dt, stock, "sell", amount, price, amount * price, commission
+            )
+
         # 日志
         if tax_adjustment > 0:
-            self.log.info(f"📊分红税 | {stock} | 补税{tax_adjustment:.2f}元")
+            self.log.info(t("order.dividend_tax_pay", stock=stock, amount="{:.2f}".format(tax_adjustment)))
         elif tax_adjustment < 0:
-            self.log.info(f"📊分红税 | {stock} | 退税{-tax_adjustment:.2f}元")
+            self.log.info(t("order.dividend_tax_refund", stock=stock, amount="{:.2f}".format(-tax_adjustment)))
 
         return True
 
@@ -312,7 +327,7 @@ class OrderProcessor:
         # 1. 获取执行价格
         price = self.get_execution_price(stock, limit_price)
         if price is None:
-            self.log.warning(f"【订单失败】{stock} | 原因: 无法获取价格")
+            self.log.warning(t("order.no_price", stock=stock))
             return False
 
         # 2. 计算交易数量

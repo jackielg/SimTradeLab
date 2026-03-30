@@ -65,10 +65,12 @@ _ALLOWED_TRANSITIONS: dict[Optional[LifecyclePhase], list[LifecyclePhase]] = {
         LifecyclePhase.HANDLE_DATA,
         LifecyclePhase.TICK_DATA,
         LifecyclePhase.ON_TRADE_RESPONSE,
+        LifecyclePhase.AFTER_TRADING_END,
     ],
     LifecyclePhase.ON_TRADE_RESPONSE: [
         LifecyclePhase.HANDLE_DATA,
         LifecyclePhase.TICK_DATA,
+        LifecyclePhase.AFTER_TRADING_END,
     ],
     LifecyclePhase.AFTER_TRADING_END: [
         LifecyclePhase.BEFORE_TRADING_START,

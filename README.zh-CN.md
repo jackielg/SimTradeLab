@@ -1,13 +1,13 @@
 # 📈 SimTradeLab
 
-[English](README.md) | 中文
+[English](README.md) | 中文 | [Deutsch](README.de.md)
 
 **轻量级量化回测框架 - PTrade API本地实现**
 
 [![Python](https://img.shields.io/badge/Python-3.9+-blue.svg)](https://www.python.org/)
 [![License](https://img.shields.io/badge/License-AGPL--3.0-blue.svg)](LICENSE)
 [![License: Commercial](https://img.shields.io/badge/License-Commercial--Available-red)](licenses/LICENSE-COMMERCIAL.md)
-[![Version](https://img.shields.io/badge/Version-2.7.0-orange.svg)](#)
+[![Version](https://img.shields.io/badge/Version-2.10.0-orange.svg)](#)
 [![PyPI](https://img.shields.io/pypi/v/simtradelab.svg)](https://pypi.org/project/simtradelab/)
 [![PyPI - Downloads](https://img.shields.io/pypi/dm/simtradelab.svg)](https://pypi.org/project/simtradelab/)
 
@@ -34,7 +34,8 @@
 - 🧠 **智能数据加载** — AST静态分析策略代码，按需加载数据，节省内存
 - 🔧 **生命周期控制** — 7个生命周期阶段，严格模拟PTrade的API调用限制
 - 📊 **完整统计报告** — 收益、风险（夏普/索提诺/卡玛）、交易明细、FIFO分红税、CSV导出
-- 🔌 **T+0 / T+1 模式** — 可配置A股、ETF、美股交易限制
+- 🔌 **多市场支持** — 内置 A 股 / 美股市场配置，自动适配交易规则（T+1、涨跌停、手数、手续费）
+- 🌐 **国际化** — 回测输出支持中文/英文/德文
 
 ---
 
@@ -67,7 +68,7 @@ pip install simtradelab[indicators]
 pip install simtradelab[optimizer]
 ```
 
-**数据获取：** 使用 [SimTradeData](https://github.com/kay-ou/SimTradeData) 获取A股历史数据。
+**数据获取：** 使用 [SimTradeData](https://github.com/kay-ou/SimTradeData) 获取A股和美股历史数据。
 
 **运行回测：**
 
@@ -76,9 +77,40 @@ from simtradelab.backtest.runner import BacktestRunner
 from simtradelab.backtest.config import BacktestConfig
 
 config = BacktestConfig(
-    strategy_name='my_strategy',
-    start_date='2024-01-01',
-    end_date='2024-12-31',
+    # --- 必填 ---
+    strategy_name='my_strategy',       # 策略文件夹名（strategies/ 下的目录名）
+    start_date='2024-01-01',           # 回测开始日期
+    end_date='2024-12-31',             # 回测结束日期
+
+    # --- 资金与市场 ---
+    # initial_capital=100000.0,        # 初始资金（必须 > 0）
+    # market='CN',                     # 市场: 'CN'(A股) | 'US'(美股)
+    # t_plus_1=None,                   # T+1覆盖: None=市场默认(CN=True, US=False)
+    # benchmark_code='',               # 基准代码，空串=市场默认基准
+
+    # --- 频率 ---
+    # frequency='1d',                  # K线频率: '1d'(日线) | '1m'(分钟线)
+
+    # --- 路径 ---
+    # data_path='~/.simtradelab/data', # 行情数据目录
+    # strategies_path='./strategies',  # 策略根目录
+
+    # --- 性能 ---
+    # enable_multiprocessing=True,     # 启用多进程数据加载
+    # num_workers=None,                # 进程数（None=自动, 必须 >= 1）
+    # use_data_server=True,            # 使用内存数据服务（单例模式）
+
+    # --- 输出 ---
+    # enable_charts=True,              # 生成PNG图表
+    # enable_logging=True,             # 写入日志文件
+    # enable_export=False,             # 导出交易明细CSV
+
+    # --- 沙箱与国际化 ---
+    # sandbox=True,                    # PTrade沙箱模式: 限制import和内置函数
+    # locale='auto',                   # 日志语言: 'zh' | 'en' | 'de'（自动：CN市场→zh，其他→系统语言）
+
+    # --- 入口文件 ---
+    # strategy_file='backtest.py',     # 入口文件: 'backtest.py' | 'live.py'
 )
 runner = BacktestRunner()
 report = runner.run(config=config)

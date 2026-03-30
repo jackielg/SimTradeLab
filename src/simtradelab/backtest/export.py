@@ -15,6 +15,7 @@ import os
 import pandas as pd
 
 from simtradelab.backtest.backtest_stats import BacktestStats
+from simtradelab.i18n import t
 
 
 def export_to_csv(report: dict, output_dir: str) -> dict[str, str]:
@@ -39,9 +40,9 @@ def export_to_csv(report: dict, output_dir: str) -> dict[str, str]:
     daily_path = _export_daily_stats(stats, output_dir, suffix)
     positions_path = _export_positions(stats, output_dir, suffix)
 
-    print("CSV 已导出:")
-    print(f"  每日统计: {daily_path}")
-    print(f"  持仓历史: {positions_path}")
+    print(t("export.done"))
+    print(t("export.daily", path=daily_path))
+    print(t("export.positions", path=positions_path))
 
     return {'daily_stats': daily_path, 'positions': positions_path}
 
@@ -81,11 +82,11 @@ def _export_positions(stats: BacktestStats, output_dir: str, suffix: str) -> str
         for pos in snapshot:
             rows.append({
                 'date': date_str,
-                'stock_code': pos['c'],
-                'name': pos['nm'],
-                'amount': pos['n'],
-                'market_value': pos['v'],
-                'cost_basis': pos['b'],
+                'stock_code': pos[0],
+                'name': pos[1],
+                'amount': pos[2],
+                'market_value': pos[3],
+                'cost_basis': pos[4],
             })
     df = pd.DataFrame(rows, columns=['date', 'stock_code', 'name', 'amount', 'market_value', 'cost_basis'])
     path = os.path.join(output_dir, f"positions_history_{suffix}.csv")

@@ -20,6 +20,7 @@ import traceback
 from typing import Any, Callable, Optional
 
 from .context import Context
+from simtradelab.i18n import t
 
 # 策略代码禁止导入的模块（与Ptrade平台一致）
 _current_backtest_date: str | None = None
@@ -232,7 +233,7 @@ class StrategyExecutionEngine:
         self._is_running = True
 
         try:
-            self.log.info(f"Starting strategy execution: {self._strategy_name}")
+            self.log.info(t("engine.start", strategy=self._strategy_name))
 
             # 1. 执行初始化
             self._execute_initialize()
@@ -244,12 +245,12 @@ class StrategyExecutionEngine:
                 success = self._run_daily_loop(date_range)
 
             if success:
-                self.log.info("Strategy execution completed successfully")
+                self.log.info(t("engine.completed"))
 
             return success
 
         except Exception as e:
-            self.log.error(f"Strategy execution failed: {e}")
+            self.log.error(t("engine.failed", error=e))
             traceback.print_exc()
             return False
 
@@ -260,7 +261,7 @@ class StrategyExecutionEngine:
         """执行初始化阶段"""
         from simtradelab.ptrade.lifecycle_controller import LifecyclePhase
 
-        self.log.info("Executing initialize phase")
+        self.log.info(t("engine.initialize"))
         self.lifecycle_controller.set_phase(LifecyclePhase.INITIALIZE)
         self._strategy_functions["initialize"](self.context)
         self.context.initialized = True
@@ -281,9 +282,10 @@ class StrategyExecutionEngine:
         # 跨日追踪：上一交易日收盘后的组合市值（用于计算真实日盈亏）
         prev_day_end_value = None
 
-        for current_date in date_range:
+        total_days = len(date_range)
+        for i, current_date in enumerate(date_range):
             if self._cancel_event and self._cancel_event.is_set():
-                self.log.info("回测已取消")
+                self.log.info(t("engine.cancelled"))
                 return False
             # 更新日期上下文
             self.context.current_dt = current_date
@@ -329,6 +331,10 @@ class StrategyExecutionEngine:
                 prev_day_end_value = self.context.portfolio.starting_cash
             self.stats_collector.collect_post_trading(self.context, prev_day_end_value)
             prev_day_end_value = current_end_value
+            # 按百分比节流：每增加 1% 才发一次，最后一天必发
+            pct = (i + 1) * 100 // total_days
+            if pct > i * 100 // total_days or i + 1 == total_days:
+                print("__PROGRESS__:{}/{}".format(i + 1, total_days))
 
         return True
 
@@ -350,9 +356,10 @@ class StrategyExecutionEngine:
         # 跨日追踪：上一交易日收盘后的组合市值
         prev_day_end_value = None
 
-        for current_date in date_range:
+        total_days = len(date_range)
+        for i, current_date in enumerate(date_range):
             if self._cancel_event and self._cancel_event.is_set():
-                self.log.info("回测已取消")
+                self.log.info(t("engine.cancelled"))
                 return False
             # 确保是 pd.Timestamp（防止 datetime.date 无法 replace 时间分量）
             current_date = pd.Timestamp(current_date)
@@ -399,6 +406,8 @@ class StrategyExecutionEngine:
                 data = Data(minute_dt, self.context.portfolio._bt_ctx)
                 if not self._safe_call('handle_data', LifecyclePhase.HANDLE_DATA, data):
                     return False
+                # 触发订单/成交回调（实盘模拟）
+                self._fire_callbacks()
                 # 在匹配的分钟bar执行run_daily任务
                 hhmm = f'{minute_dt.hour:02d}:{minute_dt.minute:02d}'
                 if hhmm in daily_task_times:
@@ -418,6 +427,9 @@ class StrategyExecutionEngine:
                 prev_day_end_value = self.context.portfolio.starting_cash
             self.stats_collector.collect_post_trading(self.context, prev_day_end_value)
             prev_day_end_value = current_end_value
+            pct = (i + 1) * 100 // total_days
+            if pct > i * 100 // total_days or i + 1 == total_days:
+                print("__PROGRESS__:{}/{}".format(i + 1, total_days))
 
         return True
 
@@ -447,13 +459,35 @@ class StrategyExecutionEngine:
         base = trade_date.normalize()
         return [base + offset for offset in self._get_minute_offsets()]
 
+    def _fire_callbacks(self) -> None:
+        """触发 on_order_response / on_trade_response 回调（实盘模拟）"""
+        from simtradelab.ptrade.lifecycle_controller import LifecyclePhase
+
+        order_callbacks = self.api.flush_order_callbacks()
+        if order_callbacks and 'on_order_response' in self._strategy_functions:
+            self.lifecycle_controller.set_phase(LifecyclePhase.ON_ORDER_RESPONSE)
+            try:
+                self._strategy_functions['on_order_response'](self.context, order_callbacks)
+            except Exception as e:
+                self.log.error(t("engine.func_failed", func='on_order_response', error=e))
+                traceback.print_exc()
+
+        trade_callbacks = self.api.flush_trade_callbacks()
+        if trade_callbacks and 'on_trade_response' in self._strategy_functions:
+            self.lifecycle_controller.set_phase(LifecyclePhase.ON_TRADE_RESPONSE)
+            try:
+                self._strategy_functions['on_trade_response'](self.context, trade_callbacks)
+            except Exception as e:
+                self.log.error(t("engine.func_failed", func='on_trade_response', error=e))
+                traceback.print_exc()
+
     def _execute_daily_tasks(self) -> None:
         """执行所有 run_daily 注册的任务（日频模式：忽略time参数，全部执行）"""
         for func, _ in self.api._daily_tasks:
             try:
                 func(self.context)
             except Exception as e:
-                self.log.error(f"run_daily任务执行失败: {e}")
+                self.log.error(t("engine.daily_task_failed", error=e))
                 self.log.error(traceback.format_exc())
 
     def _get_daily_task_time_set(self) -> set[str]:
@@ -467,7 +501,7 @@ class StrategyExecutionEngine:
                 try:
                     func(self.context)
                 except Exception as e:
-                    self.log.error(f"run_daily任务({hhmm})执行失败: {e}")
+                    self.log.error(t("engine.daily_task_time_failed", time=hhmm, error=e))
                     self.log.error(traceback.format_exc())
 
     def _execute_lifecycle(self, data) -> bool:
@@ -488,6 +522,9 @@ class StrategyExecutionEngine:
         # handle_data
         if not self._safe_call('handle_data', LifecyclePhase.HANDLE_DATA, data):
             return False
+
+        # 触发订单/成交回调（实盘模拟）
+        self._fire_callbacks()
 
         # after_trading_end（允许失败）
         self._safe_call('after_trading_end', LifecyclePhase.AFTER_TRADING_END, data, allow_fail=True)
@@ -516,7 +553,7 @@ class StrategyExecutionEngine:
         try:
             self.lifecycle_controller.set_phase(phase)
         except Exception as e:
-            self.log.error(f"设置生命周期阶段 {phase} 失败: {e}")
+            self.log.error(t("engine.phase_failed", phase=phase, error=e))
             return False
 
         # 如果函数不存在，阶段已设置，直接返回成功
@@ -528,10 +565,10 @@ class StrategyExecutionEngine:
             self._strategy_functions[func_name](self.context, data)
             return True
         except ValueError as e:
-            self.log.error(f"{func_name}执行失败: {e}")
+            self.log.error(t("engine.func_failed", func=func_name, error=e))
             return allow_fail
         except Exception as e:
-            self.log.error(f"{func_name}执行失败: {e}")
+            self.log.error(t("engine.func_failed", func=func_name, error=e))
             traceback.print_exc()
             return allow_fail
 
@@ -588,7 +625,7 @@ class StrategyExecutionEngine:
                     self.context.portfolio.add_dividend(stock_code, dividend_per_share_before_tax)
 
         except Exception as e:
-            self.log.warning(f"除权除息处理失败: {e}")
+            self.log.warning(t("engine.dividend_failed", error=e))
             traceback.print_exc()
 
     # ==========================================
@@ -597,7 +634,7 @@ class StrategyExecutionEngine:
 
     def reset_strategy(self) -> None:
         """重置策略状态"""
-        self.log.info("Resetting strategy state")
+        self.log.info(t("engine.resetting"))
 
         self._strategy_functions.clear()
         self._strategy_name = None

@@ -54,7 +54,7 @@ def update_version_in_files(version):
     pyproject.write_text(content, encoding="utf-8")
     print("  ✓ pyproject.toml")
 
-    for readme_name in ["README.md", "README.zh-CN.md"]:
+    for readme_name in ["README.md", "README.zh-CN.md", "README.de.md"]:
         readme = Path(readme_name)
         if readme.exists():
             content = readme.read_text(encoding="utf-8")
@@ -83,7 +83,7 @@ def update_version_in_files(version):
 
 
 def commit_version_update(version):
-    run_command("git add pyproject.toml README.md README.zh-CN.md")
+    run_command("git add pyproject.toml README.md README.zh-CN.md README.de.md")
     run_command('git commit -m "chore: bump version to {}"'.format(version))
 
 
