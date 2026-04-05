@@ -253,7 +253,7 @@ class StrategyExecutionEngine:
             self._execute_initialize()
 
             # 2. 根据frequency选择循环模式
-            if self.frequency in ("1m", "5m", "15m", "30m", "60m"):
+            if self.frequency == '1m':
                 success = self._run_minute_loop(date_range)
             else:
                 success = self._run_daily_loop(date_range)
@@ -454,35 +454,19 @@ class StrategyExecutionEngine:
 
         return True
 
-    # 预生成分钟时间偏移模板（按频率缓存）
-    _OFFSET_CACHE = {}
+    # 预生成分钟时间偏移模板（类级别，只算一次）
+    _MINUTE_OFFSETS = None
 
-    def _get_minute_offsets(self):
-        """根据 frequency 生成分钟时间偏移
-
-        Returns:
-            list[timedelta]: 时间偏移列表
-        """
-        freq = self.frequency
-        if freq in self._OFFSET_CACHE:
-            return self._OFFSET_CACHE[freq]
-
-        from datetime import timedelta
-
-        step = int(freq.replace("m", "")) if "m" in freq else 1
-
-        # A股交易时间: 9:30-11:30 (120分钟), 13:00-15:00 (120分钟)
-        morning = [
-            timedelta(hours=9, minutes=30) + timedelta(minutes=i)
-            for i in range(0, 120, step)
-        ]
-        afternoon = [
-            timedelta(hours=13) + timedelta(minutes=i) for i in range(0, 120, step)
-        ]
-        offsets = morning + afternoon
-
-        self._OFFSET_CACHE[freq] = offsets
-        return offsets
+    @classmethod
+    def _get_minute_offsets(cls):
+        """生成分钟时间偏移模板（惰性初始化，仅一次）"""
+        if cls._MINUTE_OFFSETS is None:
+            from datetime import timedelta
+            # A股交易时间: 9:30-11:30 (121分钟), 13:00-15:00 (121分钟)
+            morning = [timedelta(hours=9, minutes=30) + timedelta(minutes=i) for i in range(121)]
+            afternoon = [timedelta(hours=13) + timedelta(minutes=i) for i in range(121)]
+            cls._MINUTE_OFFSETS = morning + afternoon
+        return cls._MINUTE_OFFSETS
 
     def _get_minute_bars(self, trade_date):
         """生成交易日分钟时间序列

@@ -26,20 +26,17 @@ if __name__ == '__main__':
     # ==================== 回测配置 ====================
 
     # 策略名称
-    strategy_name = '5mv'
+    strategy_name = 'trends_up'
 
-    # 回测周期
-    start_date = '2025-01-01'
-    end_date = '2025-10-31'
+    start_date = '2025-01-02'
+    end_date = '2025-01-31'
 
-    # ==================== 启动回测 ====================
-
-    # 创建配置
     config = BacktestConfig(
         strategy_name=strategy_name,
         start_date=start_date,
         end_date=end_date,
-        initial_capital=100000.0
+        initial_capital=1000000.0,
+        freq="1m"
     )
 
     # 运行回测
