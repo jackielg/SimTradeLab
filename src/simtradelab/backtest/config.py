@@ -24,14 +24,12 @@ from simtradelab.i18n import _DEFAULT_LOCALE
 def _default_data_path():
     """获取默认数据路径"""
     from ..utils.paths import DATA_PATH
-
     return str(DATA_PATH)
 
 
 def _default_strategies_path():
     """获取默认策略路径"""
     from ..utils.paths import STRATEGIES_PATH
-
     return str(STRATEGIES_PATH)
 
 
@@ -43,28 +41,24 @@ class BacktestConfig(BaseModel):
     end_date: str | pd.Timestamp
     data_path: str = Field(default_factory=_default_data_path)
     strategies_path: str = Field(default_factory=_default_strategies_path)
-    initial_capital: float = Field(
-        default=100000.0, gt=0, description="初始资金必须大于0"
-    )
+    initial_capital: float = Field(default=100000.0, gt=0, description="初始资金必须大于0")
     use_data_server: bool = True
 
     # 回测频率配置
-    frequency: str = Field(default="1d", description="回测频率: '1d'日线, '1m'分钟线")
+    frequency: str = Field(default='1d', description="回测频率: '1d'日线, '1m'分钟线")
 
     # 基准配置
     benchmark_code: str = Field(default='', description="基准代码，空串时使用市场默认基准")
 
     # 性能优化配置
     enable_multiprocessing: bool = True
-    num_workers: Optional[int] = Field(
-        default=None, ge=1, description="多进程worker数量"
-    )
+    num_workers: Optional[int] = Field(default=None, ge=1, description="多进程worker数量")
     enable_charts: bool = True
     enable_logging: bool = True
     enable_export: bool = False
 
     # 沙箱模式：True=限制import和builtins（Ptrade兼容），False=本地开发无限制
-    sandbox: bool = False
+    sandbox: bool = True
 
     # 市场选择: CN=A股, US=美股
     market: str = Field(default="CN", description="市场代码")
@@ -81,12 +75,9 @@ class BacktestConfig(BaseModel):
     # 策略文件名（默认 backtest.py，实盘模拟用 live.py）
     strategy_file: str = 'backtest.py'
 
-    # 输出子目录（用于批量回测等场景，设置为 optimize_XX 可输出到 strategies/strategy_name/optimize_XX/stats）
-    output_subdir: str = Field(default='', description="输出子目录，空串表示直接在 stats 目录")
-
     model_config = {"arbitrary_types_allowed": True}
 
-    @field_validator("start_date", "end_date", mode="before")
+    @field_validator('start_date', 'end_date', mode='before')
     @classmethod
     def convert_to_timestamp(cls, v) -> pd.Timestamp:
         """转换日期为pd.Timestamp"""
@@ -94,7 +85,7 @@ class BacktestConfig(BaseModel):
             return v
         return pd.Timestamp(v)
 
-    @model_validator(mode="after")
+    @model_validator(mode='after')
     def validate_date_range(self):
         """验证日期范围
 
@@ -114,11 +105,7 @@ class BacktestConfig(BaseModel):
     @property
     def log_dir(self) -> str:
         """日志目录"""
-        base_dir = Path(self.strategies_path) / self.strategy_name
-        # 如果指定了输出子目录，则输出到 optimize_XX/stats
-        if self.output_subdir:
-            return str(base_dir / self.output_subdir / "stats")
-        return str(base_dir / "stats")
+        return str(Path(self.strategies_path) / self.strategy_name / 'stats')
 
     @property
     def _file_prefix(self) -> str:
@@ -130,8 +117,7 @@ class BacktestConfig(BaseModel):
             self._file_prefix,
             self.start_date.strftime("%y%m%d"),  # type: ignore
             self.end_date.strftime("%y%m%d"),  # type: ignore
-            datetime.now().strftime("%y%m%d_%H%M%S"),
-        )
+            datetime.now().strftime("%y%m%d_%H%M%S"))
         return str(Path(self.log_dir) / name)
 
     def get_chart_filename(self) -> str:
@@ -140,6 +126,5 @@ class BacktestConfig(BaseModel):
             self._file_prefix,
             self.start_date.strftime("%y%m%d"),  # type: ignore
             self.end_date.strftime("%y%m%d"),  # type: ignore
-            datetime.now().strftime("%y%m%d_%H%M%S"),
-        )
+            datetime.now().strftime("%y%m%d_%H%M%S"))
         return str(Path(self.log_dir) / name)

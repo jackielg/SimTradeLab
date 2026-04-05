@@ -25,16 +25,30 @@ from simtradelab.i18n import t
 # 策略代码禁止导入的模块（与Ptrade平台一致）
 _current_backtest_date: str | None = None
 
-_BLOCKED_MODULES = frozenset({
-    'os', 'sys', 'io', 'subprocess', 'shutil', 'socket', 'http', 'urllib',
-    'ctypes', 'signal', 'importlib', 'runpy', 'code', 'codeop',
-})
+_BLOCKED_MODULES = frozenset(
+    {
+        "os",
+        "sys",
+        "io",
+        "subprocess",
+        "shutil",
+        "socket",
+        "http",
+        "urllib",
+        "ctypes",
+        "signal",
+        "importlib",
+        "runpy",
+        "code",
+        "codeop",
+    }
+)
 
 _REAL_IMPORT = builtins.__import__
 
 
 def _safe_import(name, globals=None, locals=None, fromlist=(), level=0):
-    top = name.split('.')[0]
+    top = name.split(".")[0]
     if top in _BLOCKED_MODULES:
         raise ImportError(f"Module '{name}' is not allowed in strategy code")
     return _REAL_IMPORT(name, globals, locals, fromlist, level)
@@ -42,9 +56,9 @@ def _safe_import(name, globals=None, locals=None, fromlist=(), level=0):
 
 def _build_safe_builtins() -> dict:
     """构建受限 builtins，移除 exec/eval/compile/breakpoint"""
-    unsafe = {'exec', 'eval', 'compile', 'breakpoint'}
+    unsafe = {"exec", "eval", "compile", "breakpoint"}
     safe = {k: v for k, v in builtins.__dict__.items() if k not in unsafe}
-    safe['__import__'] = _safe_import
+    safe["__import__"] = _safe_import
     return safe
 
 
@@ -53,6 +67,7 @@ _SAFE_BUILTINS = _build_safe_builtins()
 
 class StrategyExecutionError(Exception):
     """策略执行错误"""
+
     pass
 
 
@@ -72,7 +87,7 @@ class StrategyExecutionEngine:
         api: Any,
         stats_collector: Any,
         log: logging.Logger,
-        frequency: str = '1d',
+        frequency: str = "1d",
         sandbox: bool = True,
         cancel_event=None,
     ):
@@ -105,6 +120,7 @@ class StrategyExecutionEngine:
         self._strategy_functions: dict[str, Callable[..., Any]] = {}
         self._strategy_name: Optional[str] = None
         self._is_running = False
+
     # ==========================================
     # 策略注册接口
     # ==========================================
@@ -116,44 +132,48 @@ class StrategyExecutionEngine:
             strategy_path: 策略文件路径
         """
         # 读取策略代码
-        with open(strategy_path, 'r', encoding='utf-8') as f:
+        with open(strategy_path, "r", encoding="utf-8") as f:
             strategy_code = f.read()
 
         # 构建命名空间
         strategy_namespace = {
-            '__builtins__': _SAFE_BUILTINS if self.sandbox else builtins.__dict__.copy(),
-            '__name__': '__main__',
-            '__file__': strategy_path,
-            'g': self.context.g,
-            'log': self.log,
-            'context': self.context,
+            "__builtins__": (
+                _SAFE_BUILTINS if self.sandbox else builtins.__dict__.copy()
+            ),
+            "__name__": "__main__",
+            "__file__": strategy_path,
+            "g": self.context.g,
+            "log": self.log,
+            "context": self.context,
         }
 
         # 注入API方法
         for attr_name in dir(self.api):
-            if not attr_name.startswith('_'):
+            if not attr_name.startswith("_"):
                 attr = getattr(self.api, attr_name)
-                if callable(attr) or attr_name == 'FUNDAMENTAL_TABLES':
+                if callable(attr) or attr_name == "FUNDAMENTAL_TABLES":
                     strategy_namespace[attr_name] = attr
 
         # 执行策略代码
         exec(strategy_code, strategy_namespace)
 
         # 自动注册所有生命周期函数
-        if 'initialize' in strategy_namespace:
-            self.register_initialize(strategy_namespace['initialize'])
-        if 'handle_data' in strategy_namespace:
-            self.register_handle_data(strategy_namespace['handle_data'])
-        if 'before_trading_start' in strategy_namespace:
-            self.register_before_trading_start(strategy_namespace['before_trading_start'])
-        if 'after_trading_end' in strategy_namespace:
-            self.register_after_trading_end(strategy_namespace['after_trading_end'])
-        if 'tick_data' in strategy_namespace:
-            self.register_tick_data(strategy_namespace['tick_data'])
-        if 'on_order_response' in strategy_namespace:
-            self.register_on_order_response(strategy_namespace['on_order_response'])
-        if 'on_trade_response' in strategy_namespace:
-            self.register_on_trade_response(strategy_namespace['on_trade_response'])
+        if "initialize" in strategy_namespace:
+            self.register_initialize(strategy_namespace["initialize"])
+        if "handle_data" in strategy_namespace:
+            self.register_handle_data(strategy_namespace["handle_data"])
+        if "before_trading_start" in strategy_namespace:
+            self.register_before_trading_start(
+                strategy_namespace["before_trading_start"]
+            )
+        if "after_trading_end" in strategy_namespace:
+            self.register_after_trading_end(strategy_namespace["after_trading_end"])
+        if "tick_data" in strategy_namespace:
+            self.register_tick_data(strategy_namespace["tick_data"])
+        if "on_order_response" in strategy_namespace:
+            self.register_on_order_response(strategy_namespace["on_order_response"])
+        if "on_trade_response" in strategy_namespace:
+            self.register_on_trade_response(strategy_namespace["on_trade_response"])
 
     def set_strategy_name(self, strategy_name: str) -> None:
         """设置策略名称
@@ -177,9 +197,7 @@ class StrategyExecutionEngine:
         """注册before_trading_start函数"""
         self._strategy_functions["before_trading_start"] = func
 
-    def register_after_trading_end(
-        self, func: Callable[[Context, Any], None]
-    ) -> None:
+    def register_after_trading_end(self, func: Callable[[Context, Any], None]) -> None:
         """注册after_trading_end函数"""
         self._strategy_functions["after_trading_end"] = func
 
@@ -187,15 +205,11 @@ class StrategyExecutionEngine:
         """注册tick_data函数"""
         self._strategy_functions["tick_data"] = func
 
-    def register_on_order_response(
-        self, func: Callable[[Context, Any], None]
-    ) -> None:
+    def register_on_order_response(self, func: Callable[[Context, Any], None]) -> None:
         """注册on_order_response函数"""
         self._strategy_functions["on_order_response"] = func
 
-    def register_on_trade_response(
-        self, func: Callable[[Context, Any], None]
-    ) -> None:
+    def register_on_trade_response(self, func: Callable[[Context, Any], None]) -> None:
         """注册on_trade_response函数"""
         self._strategy_functions["on_trade_response"] = func
 
@@ -239,7 +253,7 @@ class StrategyExecutionEngine:
             self._execute_initialize()
 
             # 2. 根据frequency选择循环模式
-            if self.frequency == '1m':
+            if self.frequency in ("1m", "5m", "15m", "30m", "60m"):
                 success = self._run_minute_loop(date_range)
             else:
                 success = self._run_daily_loop(date_range)
@@ -394,7 +408,9 @@ class StrategyExecutionEngine:
             data = Data(current_date, self.context.portfolio._bt_ctx)
 
             # 1. before_trading_start（每日一次，开盘前）
-            if not self._safe_call('before_trading_start', LifecyclePhase.BEFORE_TRADING_START, data):
+            if not self._safe_call(
+                "before_trading_start", LifecyclePhase.BEFORE_TRADING_START, data
+            ):
                 return False
 
             # 2. handle_data + run_daily任务（分钟级调用）
@@ -402,21 +418,26 @@ class StrategyExecutionEngine:
             daily_task_times = self._get_daily_task_time_set()
             for minute_dt in minute_bars:
                 self.context.current_dt = minute_dt
-                _current_backtest_date = minute_dt.strftime('%Y-%m-%d %H:%M')
+                _current_backtest_date = minute_dt.strftime("%Y-%m-%d %H:%M")
                 data = Data(minute_dt, self.context.portfolio._bt_ctx)
-                if not self._safe_call('handle_data', LifecyclePhase.HANDLE_DATA, data):
+                if not self._safe_call("handle_data", LifecyclePhase.HANDLE_DATA, data):
                     return False
                 # 触发订单/成交回调（实盘模拟）
                 self._fire_callbacks()
                 # 在匹配的分钟bar执行run_daily任务
-                hhmm = f'{minute_dt.hour:02d}:{minute_dt.minute:02d}'
+                hhmm = f"{minute_dt.hour:02d}:{minute_dt.minute:02d}"
                 if hhmm in daily_task_times:
                     self._execute_daily_tasks_for_time(hhmm)
 
             # 3. after_trading_end（每日一次，收盘后）
             self.context.current_dt = current_date.replace(hour=15, minute=0, second=0)
             data = Data(self.context.current_dt, self.context.portfolio._bt_ctx)
-            self._safe_call('after_trading_end', LifecyclePhase.AFTER_TRADING_END, data, allow_fail=True)
+            self._safe_call(
+                "after_trading_end",
+                LifecyclePhase.AFTER_TRADING_END,
+                data,
+                allow_fail=True,
+            )
 
             # 收集交易金额（从OrderProcessor累计的gross金额）
             self.stats_collector.collect_trading_amounts(self.context)
@@ -433,19 +454,35 @@ class StrategyExecutionEngine:
 
         return True
 
-    # 预生成分钟时间偏移模板（类级别，只算一次）
-    _MINUTE_OFFSETS = None
+    # 预生成分钟时间偏移模板（按频率缓存）
+    _OFFSET_CACHE = {}
 
-    @classmethod
-    def _get_minute_offsets(cls):
-        """生成分钟时间偏移模板（惰性初始化，仅一次）"""
-        if cls._MINUTE_OFFSETS is None:
-            from datetime import timedelta
-            # A股交易时间: 9:30-11:30 (121分钟), 13:00-15:00 (121分钟)
-            morning = [timedelta(hours=9, minutes=30) + timedelta(minutes=i) for i in range(121)]
-            afternoon = [timedelta(hours=13) + timedelta(minutes=i) for i in range(121)]
-            cls._MINUTE_OFFSETS = morning + afternoon
-        return cls._MINUTE_OFFSETS
+    def _get_minute_offsets(self):
+        """根据 frequency 生成分钟时间偏移
+
+        Returns:
+            list[timedelta]: 时间偏移列表
+        """
+        freq = self.frequency
+        if freq in self._OFFSET_CACHE:
+            return self._OFFSET_CACHE[freq]
+
+        from datetime import timedelta
+
+        step = int(freq.replace("m", "")) if "m" in freq else 1
+
+        # A股交易时间: 9:30-11:30 (120分钟), 13:00-15:00 (120分钟)
+        morning = [
+            timedelta(hours=9, minutes=30) + timedelta(minutes=i)
+            for i in range(0, 120, step)
+        ]
+        afternoon = [
+            timedelta(hours=13) + timedelta(minutes=i) for i in range(0, 120, step)
+        ]
+        offsets = morning + afternoon
+
+        self._OFFSET_CACHE[freq] = offsets
+        return offsets
 
     def _get_minute_bars(self, trade_date):
         """生成交易日分钟时间序列
@@ -464,21 +501,29 @@ class StrategyExecutionEngine:
         from simtradelab.ptrade.lifecycle_controller import LifecyclePhase
 
         order_callbacks = self.api.flush_order_callbacks()
-        if order_callbacks and 'on_order_response' in self._strategy_functions:
+        if order_callbacks and "on_order_response" in self._strategy_functions:
             self.lifecycle_controller.set_phase(LifecyclePhase.ON_ORDER_RESPONSE)
             try:
-                self._strategy_functions['on_order_response'](self.context, order_callbacks)
+                self._strategy_functions["on_order_response"](
+                    self.context, order_callbacks
+                )
             except Exception as e:
-                self.log.error(t("engine.func_failed", func='on_order_response', error=e))
+                self.log.error(
+                    t("engine.func_failed", func="on_order_response", error=e)
+                )
                 traceback.print_exc()
 
         trade_callbacks = self.api.flush_trade_callbacks()
-        if trade_callbacks and 'on_trade_response' in self._strategy_functions:
+        if trade_callbacks and "on_trade_response" in self._strategy_functions:
             self.lifecycle_controller.set_phase(LifecyclePhase.ON_TRADE_RESPONSE)
             try:
-                self._strategy_functions['on_trade_response'](self.context, trade_callbacks)
+                self._strategy_functions["on_trade_response"](
+                    self.context, trade_callbacks
+                )
             except Exception as e:
-                self.log.error(t("engine.func_failed", func='on_trade_response', error=e))
+                self.log.error(
+                    t("engine.func_failed", func="on_trade_response", error=e)
+                )
                 traceback.print_exc()
 
     def _execute_daily_tasks(self) -> None:
@@ -501,7 +546,9 @@ class StrategyExecutionEngine:
                 try:
                     func(self.context)
                 except Exception as e:
-                    self.log.error(t("engine.daily_task_time_failed", time=hhmm, error=e))
+                    self.log.error(
+                        t("engine.daily_task_time_failed", time=hhmm, error=e)
+                    )
                     self.log.error(traceback.format_exc())
 
     def _execute_lifecycle(self, data) -> bool:
@@ -516,28 +563,26 @@ class StrategyExecutionEngine:
         from simtradelab.ptrade.lifecycle_controller import LifecyclePhase
 
         # before_trading_start
-        if not self._safe_call('before_trading_start', LifecyclePhase.BEFORE_TRADING_START, data):
+        if not self._safe_call(
+            "before_trading_start", LifecyclePhase.BEFORE_TRADING_START, data
+        ):
             return False
 
         # handle_data
-        if not self._safe_call('handle_data', LifecyclePhase.HANDLE_DATA, data):
+        if not self._safe_call("handle_data", LifecyclePhase.HANDLE_DATA, data):
             return False
 
         # 触发订单/成交回调（实盘模拟）
         self._fire_callbacks()
 
         # after_trading_end（允许失败）
-        self._safe_call('after_trading_end', LifecyclePhase.AFTER_TRADING_END, data, allow_fail=True)
+        self._safe_call(
+            "after_trading_end", LifecyclePhase.AFTER_TRADING_END, data, allow_fail=True
+        )
 
         return True
 
-    def _safe_call(
-        self,
-        func_name: str,
-        phase,
-        data,
-        allow_fail: bool = False
-    ) -> bool:
+    def _safe_call(self, func_name: str, phase, data, allow_fail: bool = False) -> bool:
         """安全调用策略方法
 
         Args:
@@ -583,7 +628,7 @@ class StrategyExecutionEngine:
         2. 现金分红: 到账（预扣税20%）
         """
         try:
-            date_str = current_date.strftime('%Y%m%d')
+            date_str = current_date.strftime("%Y%m%d")
 
             for stock_code, position in self.context.portfolio.positions.items():
                 if position.amount <= 0:
@@ -598,12 +643,12 @@ class StrategyExecutionEngine:
                     date_int = int(date_str)
                     if date_int in exrights_df.index:
                         event = exrights_df.loc[date_int]
-                        allotted = float(event.get('allotted_ps', 0) or 0)
+                        allotted = float(event.get("allotted_ps", 0) or 0)
                         if allotted > 0:
                             new_amount = int(original_amount * (1 + allotted))
                             position.amount = new_amount
                             position.enable_amount = new_amount
-                            position.cost_basis /= (1 + allotted)
+                            position.cost_basis /= 1 + allotted
                             self.context.portfolio._invalidate_cache()
 
                 # 现金分红（按登记日股数计算）
@@ -616,13 +661,19 @@ class StrategyExecutionEngine:
 
                 dividend_per_share_before_tax = stock_dividends[date_str]
                 pre_tax_rate = 0.20
-                dividend_per_share_after_tax = dividend_per_share_before_tax * (1 - pre_tax_rate)
-                total_dividend_after_tax = dividend_per_share_after_tax * original_amount
+                dividend_per_share_after_tax = dividend_per_share_before_tax * (
+                    1 - pre_tax_rate
+                )
+                total_dividend_after_tax = (
+                    dividend_per_share_after_tax * original_amount
+                )
 
                 if total_dividend_after_tax > 0:
                     self.context.portfolio._cash += total_dividend_after_tax
                     self.context.portfolio._invalidate_cache()
-                    self.context.portfolio.add_dividend(stock_code, dividend_per_share_before_tax)
+                    self.context.portfolio.add_dividend(
+                        stock_code, dividend_per_share_before_tax
+                    )
 
         except Exception as e:
             self.log.warning(t("engine.dividend_failed", error=e))
