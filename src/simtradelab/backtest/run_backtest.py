@@ -16,9 +16,8 @@ import sys
 import argparse
 from pathlib import Path
 
-# 确保控制台 UTF-8 编码和实时输出（兼容 Windows）
-sys.stdout.reconfigure(encoding="utf-8", line_buffering=True)
-sys.stderr.reconfigure(encoding="utf-8")
+# 不强制设置编码，让 Python 自动使用终端默认编码（Windows GBK 936）
+# 这样可以避免终端乱码问题
 
 from simtradelab.backtest.runner import BacktestRunner
 from simtradelab.backtest.config import BacktestConfig
@@ -73,6 +72,18 @@ if __name__ == "__main__":
     # 3. 默认值：当前文件上级目录的 data 文件夹
     data_path = get_data_path()
 
+    # 确定策略路径：优先从环境变量读取，否则使用默认路径
+    # 批量回测时，通过环境变量确保输出到正确的 optimize_XX 目录
+    # 路径计算：run_backtest.py -> backtest -> simtradelab -> src -> SimTradeLab -> strategies
+    import os
+    strategies_path = os.environ.get(
+        'SIMTRADELAB_STRATEGIES_PATH',
+        str(Path(__file__).parent.parent.parent.parent / "strategies")
+    )
+    
+    # 读取输出子目录（用于批量回测）
+    output_subdir = os.environ.get('SIMTRADELAB_OUTPUT_SUBDIR', '')
+
     # 创建配置
     config = BacktestConfig(
         strategy_name=args.strategy,
@@ -80,6 +91,8 @@ if __name__ == "__main__":
         end_date=args.end,
         initial_capital=args.capital,
         data_path=str(data_path),
+        strategies_path=strategies_path,
+        output_subdir=output_subdir,
     )
 
     # 运行回测

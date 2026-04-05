@@ -249,9 +249,22 @@ class BacktestRunner:
                 record.backtest_dt = _se._current_backtest_date or ''
                 return True
 
-        handlers = [logging.StreamHandler(sys.stdout)]
+        # Windows 终端兼容性处理
+        # StreamHandler 使用终端默认编码（Windows: GBK, Linux/Mac: UTF-8）
+        # FileHandler 始终使用 UTF-8 确保日志文件正确保存
+        if sys.platform == 'win32':
+            try:
+                console_handler = logging.StreamHandler(sys.stdout)
+                console_handler.setFormatter(
+                    logging.Formatter('%(backtest_dt)s [%(levelname)s] %(message)s')
+                )
+                handlers = [console_handler]
+            except Exception:
+                handlers = [logging.StreamHandler(sys.stdout)]
+        else:
+            handlers = [logging.StreamHandler(sys.stdout)]
 
-        # 仅在启用日志时创建文件handler
+        # 仅在启用日志时创建文件 handler
         os.makedirs(config.log_dir, exist_ok=True)
         if config.enable_logging:
             self._log_filename = config.get_log_filename()

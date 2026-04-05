@@ -81,6 +81,9 @@ class BacktestConfig(BaseModel):
     # 策略文件名（默认 backtest.py，实盘模拟用 live.py）
     strategy_file: str = 'backtest.py'
 
+    # 输出子目录（用于批量回测等场景，设置为 optimize_XX 可输出到 strategies/strategy_name/optimize_XX/stats）
+    output_subdir: str = Field(default='', description="输出子目录，空串表示直接在 stats 目录")
+
     model_config = {"arbitrary_types_allowed": True}
 
     @field_validator("start_date", "end_date", mode="before")
@@ -111,7 +114,11 @@ class BacktestConfig(BaseModel):
     @property
     def log_dir(self) -> str:
         """日志目录"""
-        return str(Path(self.strategies_path) / self.strategy_name / "stats")
+        base_dir = Path(self.strategies_path) / self.strategy_name
+        # 如果指定了输出子目录，则输出到 optimize_XX/stats
+        if self.output_subdir:
+            return str(base_dir / self.output_subdir / "stats")
+        return str(base_dir / "stats")
 
     @property
     def _file_prefix(self) -> str:
