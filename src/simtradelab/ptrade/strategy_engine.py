@@ -253,7 +253,7 @@ class StrategyExecutionEngine:
             self._execute_initialize()
 
             # 2. 根据frequency选择循环模式
-            if self.frequency == '1m':
+            if self.frequency == "1m":
                 success = self._run_minute_loop(date_range)
             else:
                 success = self._run_daily_loop(date_range)
@@ -305,7 +305,10 @@ class StrategyExecutionEngine:
             self.context.current_dt = current_date
             self.context.blotter.current_dt = current_date
             global _current_backtest_date
-            _current_backtest_date = str(current_date.date())
+            if hasattr(current_date, "hour"):
+                _current_backtest_date = current_date.strftime("%Y-%m-%d %H:%M:%S")
+            else:
+                _current_backtest_date = "{} 00:00:00".format(current_date)
             prev_trade_day = self.api.get_trading_day(-1)
             if prev_trade_day:
                 self.context.previous_date = prev_trade_day
@@ -382,7 +385,10 @@ class StrategyExecutionEngine:
             self.context.current_dt = current_date
             self.context.blotter.current_dt = current_date
             global _current_backtest_date
-            _current_backtest_date = str(current_date.date())
+            if hasattr(current_date, "hour"):
+                _current_backtest_date = current_date.strftime("%Y-%m-%d %H:%M:%S")
+            else:
+                _current_backtest_date = "{} 00:00:00".format(current_date)
 
             # 使用API获取真正的前一交易日
             prev_trade_day = self.api.get_trading_day(-1)
@@ -418,7 +424,7 @@ class StrategyExecutionEngine:
             daily_task_times = self._get_daily_task_time_set()
             for minute_dt in minute_bars:
                 self.context.current_dt = minute_dt
-                _current_backtest_date = minute_dt.strftime("%Y-%m-%d %H:%M")
+                _current_backtest_date = minute_dt.strftime("%Y-%m-%d %H:%M:%S")
                 data = Data(minute_dt, self.context.portfolio._bt_ctx)
                 if not self._safe_call("handle_data", LifecyclePhase.HANDLE_DATA, data):
                     return False
@@ -462,8 +468,12 @@ class StrategyExecutionEngine:
         """生成分钟时间偏移模板（惰性初始化，仅一次）"""
         if cls._MINUTE_OFFSETS is None:
             from datetime import timedelta
+
             # A股交易时间: 9:30-11:30 (121分钟), 13:00-15:00 (121分钟)
-            morning = [timedelta(hours=9, minutes=30) + timedelta(minutes=i) for i in range(121)]
+            morning = [
+                timedelta(hours=9, minutes=30) + timedelta(minutes=i)
+                for i in range(121)
+            ]
             afternoon = [timedelta(hours=13) + timedelta(minutes=i) for i in range(121)]
             cls._MINUTE_OFFSETS = morning + afternoon
         return cls._MINUTE_OFFSETS

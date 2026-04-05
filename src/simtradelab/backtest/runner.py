@@ -238,20 +238,24 @@ class BacktestRunner:
     def _setup_logging(self, config: BacktestConfig):
         """配置日志系统
 
+        使用 BacktestTimeFormatter 注入回测时间戳
+        格式: YYYY-MM-DD HH:MM:SS - LEVEL - MESSAGE
+
         Args:
             config: 回测配置
         """
         import sys
         from simtradelab.ptrade import strategy_engine as _se
 
-        class BacktestDateFilter(logging.Filter):
-            def filter(self, record):
-                record.backtest_dt = _se._current_backtest_date or ''
-                return True
+        class BacktestTimeFormatter(logging.Formatter):
+            """自定义日志格式化器：使用回测时间而非实际时间"""
+            def format(self, record):
+                bt_time = _se._current_backtest_date or '0000-00-00 00:00:00'
+                record.backtest_time = bt_time
+                return super().format(record)
 
         handlers = [logging.StreamHandler(sys.stdout)]
 
-        # 仅在启用日志时创建文件handler
         os.makedirs(config.log_dir, exist_ok=True)
         if config.enable_logging:
             self._log_filename = config.get_log_filename()
@@ -260,12 +264,11 @@ class BacktestRunner:
         if config.enable_charts:
             self._chart_filename = config.get_chart_filename()
 
-        for h in handlers:
-            h.addFilter(BacktestDateFilter())
+        for handler in handlers:
+            handler.setFormatter(BacktestTimeFormatter('%(backtest_time)s - %(levelname)s - %(message)s'))
 
         logging.basicConfig(
             level=logging.INFO,
-            format='%(backtest_dt)s [%(levelname)s] %(message)s',
             handlers=handlers,
             force=True
         )

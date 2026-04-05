@@ -36,7 +36,7 @@ if __name__ == '__main__':
         start_date=start_date,
         end_date=end_date,
         initial_capital=1000000.0,
-        freq="1m"
+        frequency="1m"
     )
 
     # 运行回测
