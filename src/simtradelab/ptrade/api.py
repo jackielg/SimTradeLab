@@ -734,13 +734,13 @@ class PtradeAPI:
                     result[stock] = self._apply_adj_factors(stock_df, stock, fq)
 
         if not result:
-            self.log.warning(t("api.get_price_empty", stocks=security, frequency=frequency, fq=fq))
+            self.log.debug(t("api.get_price_empty", stocks=security, frequency=frequency, fq=fq))
             return pd.DataFrame()
 
         if is_single_stock:
             stock_df = result.get(security)
             if stock_df is None:
-                self.log.warning(t("api.get_price_no_data", stock=security, frequency=frequency, fq=fq))
+                self.log.debug(t("api.get_price_no_data", stock=security, frequency=frequency, fq=fq))
                 return pd.DataFrame()
             return stock_df[fields_list] if len(fields_list) > 0 else stock_df
 
@@ -830,10 +830,15 @@ class PtradeAPI:
                         continue
                     current_idx = idx
                 else:
-                    date_dict, _ = self.get_stock_date_index(stock)
-                    current_idx = date_dict.get(current_dt.value)
+                    date_dict, sorted_dates = self.get_stock_date_index(stock)
+                    # 将查询时间规范化到当天的 00:00:00（消除日内时间戳的影响）
+                    date_dt = current_dt.normalize()
+                    current_idx = date_dict.get(date_dt.value)
                     if current_idx is None:
-                        current_idx = data_source.index.get_loc(current_dt)
+                        idx = np.searchsorted(sorted_dates, date_dt.value, side="right") - 1
+                        if idx < 0:
+                            continue
+                        current_idx = int(idx)
                 stock_info[stock] = (data_source, current_idx)
             except (KeyError, IndexError):
                 continue
@@ -910,7 +915,7 @@ class PtradeAPI:
 
         # 转换为返回格式并缓存
         if not result:
-            self.log.warning(t("api.get_history_empty", stocks=security_list, count=count, frequency=frequency, fq=fq))
+            self.log.debug(t("api.get_history_empty", stocks=security_list, count=count, frequency=frequency, fq=fq))
             final_result = {} if is_dict else pd.DataFrame()
         elif is_dict:
             # Ptrade返回 OrderedDict[stock → structured numpy array]
@@ -1941,18 +1946,24 @@ class PtradeAPI:
         Returns:
             np.ndarray: RSI指标值的时间序列
         """
-        try:
-            import talib
-        except ImportError:
-            raise ImportError("get_RSI需要安装ta-lib库: pip install ta-lib")
-
         if not isinstance(close, np.ndarray):
             close = np.array(close, dtype=float)
-
-        # 使用talib计算RSI
-        rsi = talib.RSI(close, timeperiod=n)
-
-        return rsi
+            
+        try:
+            import talib
+            return talib.RSI(close, timeperiod=n)
+        except ImportError:
+            # Fallback to pandas implementation
+            import pandas as pd
+            s = pd.Series(close)
+            delta = s.diff()
+            up = delta.clip(lower=0)
+            down = -1 * delta.clip(upper=0)
+            ema_up = up.ewm(com=n-1, adjust=False).mean()
+            ema_down = down.ewm(com=n-1, adjust=False).mean()
+            rs = ema_up / ema_down
+            rsi = 100 - (100 / (1 + rs))
+            return rsi.values
 
     def get_CCI(self, high: np.ndarray, low: np.ndarray, close: np.ndarray, n: int = 14) -> np.ndarray:
         """计算CCI指标（顺势指标）

@@ -83,8 +83,11 @@ def timer(threshold=0.1, name=None):
                             print(_t("perf.timing", name=func_name, time="{:.2f}".format(elapsed)), flush=True)
                     elif class_name in ['BacktestRunner', 'StrategyExecutionEngine', 'ServerBacktestRunner']:
                         # 回测相关类显示耗时
-                        from simtradelab.i18n import t
-                        print(t("perf.complete", name=func_name, time=format_elapsed_time(elapsed)), flush=True)
+                        from simtradelab.i18n import t as _t
+                        if func_name in ("run", "run_backtest"):
+                            pass # complete timing is handled elsewhere
+                        else:
+                            print(_t("perf.complete", name=func_name, time=format_elapsed_time(elapsed)), flush=True)
                     else:
                         # 其他类默认格式
                         from simtradelab.i18n import t as _t
@@ -139,4 +142,4 @@ def timed(name="", threshold=0.1):
         elapsed = time.perf_counter() - start
         if elapsed >= threshold:
             from simtradelab.i18n import t as _t
-            print(_t("perf.timing", name=name, time="{:.2f}".format(elapsed)), flush=True)
+            pass # print(_t("perf.timing", name=name, time="{:.2f}".format(elapsed)), flush=True)

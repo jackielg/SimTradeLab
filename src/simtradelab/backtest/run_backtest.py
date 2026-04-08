@@ -13,6 +13,7 @@
 
 
 import sys
+import argparse
 
 # 确保控制台 UTF-8 编码和实时输出（兼容 Windows）
 sys.stdout.reconfigure(encoding='utf-8', line_buffering=True)
@@ -25,18 +26,21 @@ from simtradelab.backtest.config import BacktestConfig
 if __name__ == '__main__':
     # ==================== 回测配置 ====================
 
-    # 策略名称
-    strategy_name = 'trends_up'
-
-    start_date = '2025-01-02'
-    end_date = '2025-01-31'
+    parser = argparse.ArgumentParser(description="Run SimTradeLab Backtest")
+    parser.add_argument('-strategy', '--strategy', type=str, default='trends_up', help='Strategy name')
+    parser.add_argument('--start', type=str, default='2025-01-02', help='Start date')
+    parser.add_argument('--end', type=str, default='2025-01-31', help='End date')
+    parser.add_argument('--capital', type=float, default=1000000.0, help='Initial capital')
+    parser.add_argument('--frequency', type=str, default='1m', help='Frequency')
+    
+    args = parser.parse_args()
 
     config = BacktestConfig(
-        strategy_name=strategy_name,
-        start_date=start_date,
-        end_date=end_date,
-        initial_capital=1000000.0,
-        frequency="1m"
+        strategy_name=args.strategy,
+        start_date=args.start,
+        end_date=args.end,
+        initial_capital=args.capital,
+        frequency=args.frequency
     )
 
     # 运行回测

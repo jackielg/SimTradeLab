@@ -600,36 +600,39 @@ class Portfolio:
 
         优化：收盘价按日缓存，交易后重算只做算术，不重复 DataFrame 查找
         """
+        import numpy as np
+        import pandas as pd
         current_date = self._context.current_dt if self._context else None
         if current_date is not None and current_date == self._cache_date and self._cached_portfolio_value is not None:
             return self._cached_portfolio_value
 
         total = self._cash
 
-        # 日切时清空收盘价缓存
-        if current_date != self._close_price_cache_date:
+        current_day = current_date.normalize() if current_date is not None and hasattr(current_date, 'normalize') else current_date
+
+        if current_day != self._close_price_cache_date:
             self._close_price_cache = {}
-            self._close_price_cache_date = current_date
+            self._close_price_cache_date = current_day
 
         positions_value = 0.0
         for stock, position in self.positions.items():
             if position.amount <= 0:
                 continue
 
-            # 从日缓存获取收盘价
             if stock in self._close_price_cache:
                 current_price = self._close_price_cache[stock]
             else:
                 current_price = position.cost_basis
-                if self._bt_ctx and self._bt_ctx.get_stock_date_index:
+                if self._bt_ctx and hasattr(self._bt_ctx, 'get_stock_date_index'):
                     stock_df = self._bt_ctx.stock_data_dict.get(stock)
                     if stock_df is not None and isinstance(stock_df, pd.DataFrame) and self._context:
                         date_dict, _ = self._bt_ctx.get_stock_date_index(stock)
-                        idx = date_dict.get(self._context.current_dt.value)
-                        if idx is not None:
-                            price = stock_df['close'].values[idx]
-                            if not np.isnan(price) and price > 0:
-                                current_price = price
+                        if current_day is not None:
+                            idx = date_dict.get(current_day.value)
+                            if idx is not None:
+                                price = stock_df['close'].values[idx]
+                                if not np.isnan(price) and price > 0:
+                                    current_price = price
                 self._close_price_cache[stock] = current_price
 
             position.last_sale_price = current_price

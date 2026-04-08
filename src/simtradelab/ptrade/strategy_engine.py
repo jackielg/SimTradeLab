@@ -351,7 +351,10 @@ class StrategyExecutionEngine:
             # 按百分比节流：每增加 1% 才发一次，最后一天必发
             pct = (i + 1) * 100 // total_days
             if pct > i * 100 // total_days or i + 1 == total_days:
-                print("__PROGRESS__:{}/{}".format(i + 1, total_days))
+                try:
+                    print("__PROGRESS__:{}/{}".format(i + 1, total_days))
+                except OSError:
+                    pass
 
         return True
 
@@ -410,10 +413,10 @@ class StrategyExecutionEngine:
             # 处理除权除息事件（在策略执行前）
             self._process_dividend_events(current_date)
 
-            # 构造data对象
-            data = Data(current_date, self.context.portfolio._bt_ctx)
-
             # 1. before_trading_start（每日一次，开盘前）
+            self.context.current_dt = current_date.replace(hour=8, minute=30, second=0)
+            _current_backtest_date = self.context.current_dt.strftime("%Y-%m-%d %H:%M:%S")
+            data = Data(self.context.current_dt, self.context.portfolio._bt_ctx)
             if not self._safe_call(
                 "before_trading_start", LifecyclePhase.BEFORE_TRADING_START, data
             ):
@@ -436,7 +439,8 @@ class StrategyExecutionEngine:
                     self._execute_daily_tasks_for_time(hhmm)
 
             # 3. after_trading_end（每日一次，收盘后）
-            self.context.current_dt = current_date.replace(hour=15, minute=0, second=0)
+            self.context.current_dt = current_date.replace(hour=15, minute=30, second=0)
+            _current_backtest_date = self.context.current_dt.strftime("%Y-%m-%d %H:%M:%S")
             data = Data(self.context.current_dt, self.context.portfolio._bt_ctx)
             self._safe_call(
                 "after_trading_end",
@@ -456,7 +460,10 @@ class StrategyExecutionEngine:
             prev_day_end_value = current_end_value
             pct = (i + 1) * 100 // total_days
             if pct > i * 100 // total_days or i + 1 == total_days:
-                print("__PROGRESS__:{}/{}".format(i + 1, total_days))
+                try:
+                    print("__PROGRESS__:{}/{}".format(i + 1, total_days))
+                except OSError:
+                    pass
 
         return True
 
@@ -555,23 +562,33 @@ class StrategyExecutionEngine:
             是否成功执行
         """
         from simtradelab.ptrade.lifecycle_controller import LifecyclePhase
+        global _current_backtest_date
 
         # before_trading_start
+        self.context.current_dt = data.current_dt.replace(hour=8, minute=30, second=0)
+        _current_backtest_date = self.context.current_dt.strftime("%Y-%m-%d %H:%M:%S")
+        before_data = data.__class__(self.context.current_dt, self.context.portfolio._bt_ctx)
         if not self._safe_call(
-            "before_trading_start", LifecyclePhase.BEFORE_TRADING_START, data
+            "before_trading_start", LifecyclePhase.BEFORE_TRADING_START, before_data
         ):
             return False
 
         # handle_data
-        if not self._safe_call("handle_data", LifecyclePhase.HANDLE_DATA, data):
+        self.context.current_dt = data.current_dt.replace(hour=15, minute=0, second=0)
+        _current_backtest_date = self.context.current_dt.strftime("%Y-%m-%d %H:%M:%S")
+        handle_data_obj = data.__class__(self.context.current_dt, self.context.portfolio._bt_ctx)
+        if not self._safe_call("handle_data", LifecyclePhase.HANDLE_DATA, handle_data_obj):
             return False
 
         # 触发订单/成交回调（实盘模拟）
         self._fire_callbacks()
 
         # after_trading_end（允许失败）
+        self.context.current_dt = data.current_dt.replace(hour=15, minute=30, second=0)
+        _current_backtest_date = self.context.current_dt.strftime("%Y-%m-%d %H:%M:%S")
+        after_data = data.__class__(self.context.current_dt, self.context.portfolio._bt_ctx)
         self._safe_call(
-            "after_trading_end", LifecyclePhase.AFTER_TRADING_END, data, allow_fail=True
+            "after_trading_end", LifecyclePhase.AFTER_TRADING_END, after_data, allow_fail=True
         )
 
         return True
