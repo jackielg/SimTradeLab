@@ -408,7 +408,7 @@ class PtradeAPI:
 
     # 定义字段所属表的映射
     FUNDAMENTAL_TABLES = {
-        "valuation": ["pe_ttm", "pb", "ps_ttm", "pcf", "total_value", "float_value"],
+        "valuation": ["pe_ttm", "pb", "ps_ttm", "pcf", "total_shares", "a_floats"],
         "profit_ability": [
             "roe",
             "roa",
@@ -640,9 +640,9 @@ class PtradeAPI:
 
     def _get_data_source(self, frequency: str):
         """根据frequency获取对应的数据源"""
-        if frequency == "1m":
+        if frequency in ("1m", "5m"):
             if self.data_context.stock_data_dict_1m is None:
-                raise ValueError("分钟数据未加载，请确保data/stocks_1m/目录存在分钟数据")
+                raise ValueError("分钟数据未加载，请确保data/stocks_5m/目录存在分钟数据")
             return self.data_context.stock_data_dict_1m
         return self.data_context.stock_data_dict
 
@@ -800,7 +800,7 @@ class PtradeAPI:
             return self._history_cache[cache_key]
 
         # 根据frequency选择数据源
-        if frequency == "1m":
+        if frequency in ("1m", "5m"):
             stock_data_dict = self._get_data_source(frequency)
         else:
             stock_data_dict = self.data_context.stock_data_dict
@@ -811,7 +811,7 @@ class PtradeAPI:
 
         for stock in stocks:
             data_source = stock_data_dict.get(stock) if stock_data_dict else None
-            if data_source is None and frequency != "1m":
+            if data_source is None and frequency not in ("1m", "5m"):
                 data_source = benchmark_data.get(stock)
             if data_source is not None:
                 stock_dfs[stock] = data_source
@@ -822,9 +822,7 @@ class PtradeAPI:
             if not isinstance(data_source, pd.DataFrame):
                 continue
             try:
-                if frequency == "1m":
-                    # 分钟数据：使用searchsorted查找
-                    # 用 DatetimeIndex.searchsorted 避免 datetime64[us] vs ns 单位不匹配
+                if frequency in ("1m", "5m"):
                     idx = data_source.index.searchsorted(current_dt, side="right") - 1
                     if idx < 0:
                         continue
@@ -846,9 +844,9 @@ class PtradeAPI:
         # 优化3+4: 批量切片+复权（减少循环开销）
         result = {}
         # 分钟数据不支持复权
-        needs_adj_pre = frequency != "1m" and fq == "pre" and self.data_context.adj_pre_cache
-        needs_adj_dypre = frequency != "1m" and fq == "dypre" and self.data_context.adj_pre_cache
-        needs_adj_post = frequency != "1m" and fq == "post" and self.data_context.adj_post_cache
+        needs_adj_pre = frequency not in ("1m", "5m") and fq == "pre" and self.data_context.adj_pre_cache
+        needs_adj_dypre = frequency not in ("1m", "5m") and fq == "dypre" and self.data_context.adj_pre_cache
+        needs_adj_post = frequency not in ("1m", "5m") and fq == "post" and self.data_context.adj_post_cache
         price_fields = {"open", "high", "low", "close"}  # 预先构建集合,提升查找速度
 
         for stock, (data_source, current_idx) in stock_info.items():
