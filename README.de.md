@@ -7,7 +7,7 @@
 [![Python](https://img.shields.io/badge/Python-3.9+-blue.svg)](https://www.python.org/)
 [![License](https://img.shields.io/badge/License-AGPL--3.0-blue.svg)](LICENSE)
 [![License: Commercial](https://img.shields.io/badge/License-Commercial--Available-red)](licenses/LICENSE-COMMERCIAL.md)
-[![Version](https://img.shields.io/badge/Version-2.10.0-orange.svg)](#)
+[![Version](https://img.shields.io/badge/Version-2.10.2-orange.svg)](#)
 [![PyPI](https://img.shields.io/pypi/v/simtradelab.svg)](https://pypi.org/project/simtradelab/)
 [![PyPI - Downloads](https://img.shields.io/pypi/dm/simtradelab.svg)](https://pypi.org/project/simtradelab/)
 
@@ -27,7 +27,7 @@
 
 **Kernfunktionen:**
 
-- ✅ **46 APIs** — 100% Abdeckung für Aktien-Backtesting (Tages- und Minutenbalken)
+- ✅ **62 APIs** — 100% Abdeckung für Aktien-Backtesting (Tages- und Minutenbalken)
 - ⚡ **100–160x schneller** als die PTrade-Plattform
 - 🚀 **In-Memory-Datenpersistenz** — Singleton-Muster, Start unter einer Sekunde nach dem ersten Laden
 - 💾 **Mehrstufiges Caching** — LRU-Caches für MA/VWAP/Anpassungsfaktoren/Historie, >95% Trefferquote
@@ -85,6 +85,7 @@ config = BacktestConfig(
     # --- Kapital & Markt ---
     # initial_capital=100000.0,        # Startkapital (muss > 0 sein)
     # market='CN',                     # Markt: 'CN' (A-Aktien) | 'US'
+    # broker_profile='auto',           # Broker-API-Profil: 'auto' | 'guosheng' | 'dongguan' | 'shanxi'
     # t_plus_1=None,                   # T+1-Override: None=Marktstandard (CN=True, US=False)
     # benchmark_code='',               # Benchmark-Code, leer=Marktstandard
 
@@ -108,6 +109,7 @@ config = BacktestConfig(
     # --- Sandbox & i18n ---
     # sandbox=True,                    # PTrade-Sandbox: Import- & Builtin-Beschränkungen
     # locale='auto',                   # Log-Sprache: 'zh' | 'en' | 'de' (auto: CN-Markt→zh, sonst Systemsprache)
+    # optimization_mode=False,         # Optimierungsmodus: Validierung/Datenanalyse/Log-Setup überspringen (vom Optimierer gesteuert)
 
     # --- Einstiegsdatei ---
     # strategy_file='backtest.py',     # Einstiegsdatei: 'backtest.py' | 'live.py'

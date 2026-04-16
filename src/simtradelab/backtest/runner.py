@@ -22,11 +22,7 @@ from simtradelab.i18n import set_locale, t
 from simtradelab.ptrade.context import Context
 from simtradelab.ptrade.object import Portfolio, BacktestContext
 from simtradelab.ptrade.config_manager import config as ptrade_config
-from simtradelab.backtest.stats import (
-    generate_backtest_report,
-    generate_backtest_charts,
-    print_backtest_report,
-)
+from simtradelab.backtest.stats import generate_backtest_report, generate_backtest_charts, print_backtest_report
 from simtradelab.ptrade.api import PtradeAPI
 from simtradelab.service.data_server import DataServer
 from simtradelab.backtest.config import BacktestConfig
@@ -41,7 +37,8 @@ class BacktestRunner:
     """回测执行器 - 负责编排整个回测流程"""
 
     def __init__(self):
-        """初始化回测执行器"""
+        """初始化回测执行器
+        """
 
         # 数据容器（延迟加载）
         self._data_loaded = False
@@ -86,7 +83,8 @@ class BacktestRunner:
         if not config.optimization_mode:
             print(t("bt.checking_strategy"))
             is_valid, errors, fixed_code = validate_strategy_file(
-                config.strategy_path, check_py35_compat=config.sandbox
+                config.strategy_path,
+                check_py35_compat=config.sandbox
             )
             if not is_valid:
                 print(t("bt.validation_failed"))
@@ -102,9 +100,8 @@ class BacktestRunner:
             print(t("bt.analyzing_deps"))
             from simtradelab.ptrade.strategy_data_analyzer import (
                 analyze_strategy_data_requirements,
-                print_dependencies,
+                print_dependencies
             )
-
             deps = analyze_strategy_data_requirements(config.strategy_path)
             print_dependencies(deps)
             print("")
@@ -116,16 +113,13 @@ class BacktestRunner:
         else:
             required_data = set()
             if deps.needs_price_data:
-                required_data.add("price")
+                required_data.add('price')
             if deps.needs_valuation:
-                required_data.add("valuation")
+                required_data.add('valuation')
             if deps.needs_fundamentals:
-                required_data.add("fundamentals")
+                required_data.add('fundamentals')
             if deps.needs_exrights:
-                required_data.add("exrights")
-
-            if config.frequency == "1m" and "price" in required_data:
-                required_data.add("price_1m")
+                required_data.add('exrights')
 
         # 获取市场配置
         profile = get_market_profile(config.market)
@@ -133,9 +127,7 @@ class BacktestRunner:
 
         try:
             # 加载数据
-            benchmark_df = self._load_data(
-                required_data, config.frequency, config.data_path, config.market
-            )
+            benchmark_df = self._load_data(required_data, config.frequency, config.data_path, config.market)
 
             if self._cancel_event and self._cancel_event.is_set():
                 return {}
@@ -143,38 +135,18 @@ class BacktestRunner:
             # 初始化日志
             if not config.optimization_mode:
                 self._setup_logging(config)
-            log = logging.getLogger("backtest")
+            log = logging.getLogger('backtest')
 
             if not config.optimization_mode:
                 log.info(t("bt.start", strategy=config.strategy_name))
-                log.info(
-                    t(
-                        "bt.period",
-                        start=config.start_date.date(),
-                        end=config.end_date.date(),
-                    )
-                )
+                log.info(t("bt.period", start=config.start_date.date(), end=config.end_date.date()))
 
             # 创建交易日序列
-            date_range = self._create_date_range(
-                benchmark_df, config.start_date, config.end_date
-            )
+            date_range = self._create_date_range(benchmark_df, config.start_date, config.end_date)
 
             if len(date_range) == 0:
-                log.error(
-                    t(
-                        "bt.empty_dates",
-                        start=config.start_date.date(),
-                        end=config.end_date.date(),
-                    )
-                )
-                log.error(
-                    t(
-                        "bt.benchmark_range",
-                        start=benchmark_df.index.min(),
-                        end=benchmark_df.index.max(),
-                    )
-                )
+                log.error(t("bt.empty_dates", start=config.start_date.date(), end=config.end_date.date()))
+                log.error(t("bt.benchmark_range", start=benchmark_df.index.min(), end=benchmark_df.index.max()))
                 return {}
 
             log.info(t("bt.trading_days", count=len(date_range)))
@@ -182,11 +154,7 @@ class BacktestRunner:
             # 初始化回测组件
             context, api = self._initialize_context(config, config.start_date, log)
             name_map: dict[str, str] = {}
-            if (
-                self.stock_metadata is not None
-                and not self.stock_metadata.empty
-                and "stock_name" in self.stock_metadata.columns
-            ):
+            if self.stock_metadata is not None and not self.stock_metadata.empty and "stock_name" in self.stock_metadata.columns:
                 name_map = self.stock_metadata["stock_name"].to_dict()
             stats_collector = StatsCollector(name_map=name_map)
             api.stats_collector = stats_collector
@@ -231,13 +199,7 @@ class BacktestRunner:
             self._cleanup()
 
     @timer(name="perf.name.data_load")
-    def _load_data(
-        self,
-        required_data=None,
-        frequency="1d",
-        data_path: str = None,
-        market: str = "CN",
-    ) -> pd.DataFrame:
+    def _load_data(self, required_data=None, frequency='1d', data_path: str = None, market: str = "CN") -> pd.DataFrame:
         """加载数据
 
         Args:
@@ -251,7 +213,7 @@ class BacktestRunner:
             # 数据已加载，直接返回
             print(t("bt.data_cached"))
             # 从 benchmark_data 获取默认基准(会在后续根据 context.benchmark 重新选择)
-            return next(iter(self.benchmark_data.values()))  # type: ignore
+            return next(iter(self.benchmark_data.values())) # type: ignore
 
         # 使用多进程安全的DataServer
         data_server = DataServer(required_data, frequency, data_path, market=market)
@@ -269,15 +231,12 @@ class BacktestRunner:
         self.adj_pre_cache = data_server.adj_pre_cache
         self.adj_post_cache = data_server.adj_post_cache
         self.dividend_cache = data_server.dividend_cache
-        self.trade_days = getattr(data_server, "trade_days", None)
+        self.trade_days = getattr(data_server, 'trade_days', None)
         self._data_loaded = True
         return data_server.get_benchmark_data()
 
     def _setup_logging(self, config: BacktestConfig):
         """配置日志系统
-
-        使用 BacktestTimeFormatter 注入回测时间戳
-        格式: YYYY-MM-DD HH:MM:SS - LEVEL - MESSAGE
 
         Args:
             config: 回测配置
@@ -285,32 +244,31 @@ class BacktestRunner:
         import sys
         from simtradelab.ptrade import strategy_engine as _se
 
-        class BacktestTimeFormatter(logging.Formatter):
-            """自定义日志格式化器：使用回测时间而非实际时间"""
-
-            def format(self, record):
-                bt_time = _se._current_backtest_date or "0000-00-00 00:00:00"
-                record.backtest_time = bt_time
-                return super().format(record)
+        class BacktestDateFilter(logging.Filter):
+            def filter(self, record):
+                record.backtest_dt = _se._current_backtest_date or ''
+                return True
 
         handlers = [logging.StreamHandler(sys.stdout)]
 
+        # 仅在启用日志时创建文件handler
         os.makedirs(config.log_dir, exist_ok=True)
         if config.enable_logging:
             self._log_filename = config.get_log_filename()
             print(t("bt.log_file", path=self._log_filename))
-            handlers.append(
-                logging.FileHandler(self._log_filename, mode="w", encoding="utf-8")
-            )
+            handlers.append(logging.FileHandler(self._log_filename, mode='w', encoding='utf-8'))
         if config.enable_charts:
             self._chart_filename = config.get_chart_filename()
 
-        for handler in handlers:
-            handler.setFormatter(
-                BacktestTimeFormatter("%(backtest_time)s - %(levelname)s - %(message)s")
-            )
+        for h in handlers:
+            h.addFilter(BacktestDateFilter())
 
-        logging.basicConfig(level=logging.INFO, handlers=handlers, force=True)
+        logging.basicConfig(
+            level=logging.INFO,
+            format='%(backtest_dt)s [%(levelname)s] %(message)s',
+            handlers=handlers,
+            force=True
+        )
 
     def _create_date_range(self, benchmark_df: pd.DataFrame, start_date, end_date):
         """创建交易日序列
@@ -324,9 +282,9 @@ class BacktestRunner:
             交易日DatetimeIndex
         """
         return benchmark_df.index[
-            (benchmark_df.index >= start_date)
-            & (benchmark_df.index <= end_date)
-            & (benchmark_df["volume"] > 0)
+            (benchmark_df.index >= start_date) &
+            (benchmark_df.index <= end_date) &
+            (benchmark_df['volume'] > 0)
         ]
 
     def _initialize_context(self, config: BacktestConfig, start_date, log) -> tuple:
@@ -347,18 +305,13 @@ class BacktestRunner:
 
         # 创建组合和上下文
         portfolio = Portfolio(config.initial_capital)
-        t_plus_1 = (
-            config.t_plus_1 if config.t_plus_1 is not None else self._profile.t_plus_1
-        )
-        context = Context(
-            portfolio=portfolio,
-            current_dt=start_date,
-            frequency=config.frequency,
-            t_plus_1=t_plus_1,
-        )
+        t_plus_1 = config.t_plus_1 if config.t_plus_1 is not None else self._profile.t_plus_1
+        context = Context(portfolio=portfolio, current_dt=start_date,
+                          frequency=config.frequency, t_plus_1=t_plus_1, broker_profile=config.broker_profile)
 
         # 设置portfolio的context引用
         portfolio._context = context
+        context.g.broker_profile = config.broker_profile
 
         # 创建数据上下文
         data_context = DataContext(
@@ -374,11 +327,15 @@ class BacktestRunner:
             adj_post_cache=self.adj_post_cache,
             dividend_cache=self.dividend_cache,
             trade_days=self.trade_days,
-            stock_data_dict_1m=self.stock_data_dict_1m,
+            stock_data_dict_1m=self.stock_data_dict_1m
         )
 
         # 创建API
-        api = PtradeAPI(data_context=data_context, context=context, log=log)
+        api = PtradeAPI(
+            data_context=data_context,
+            context=context,
+            log=log
+        )
         api.lot_size = self._profile.lot_size
         api.has_price_limit = self._profile.has_price_limit
 
@@ -393,7 +350,7 @@ class BacktestRunner:
             check_limit_func=api.check_limit,
             log_obj=log,
             context_obj=context,
-            data_context=data_context,
+            data_context=data_context
         )
 
         # 绑定回测上下文
@@ -442,14 +399,10 @@ class BacktestRunner:
         Returns:
             回测报告字典
         """
-        log = logging.getLogger("backtest")
+        log = logging.getLogger('backtest')
 
         # 优先使用配置中的benchmark_code，如果未设置则从context获取
-        benchmark_code = (
-            config.benchmark_code
-            or context.benchmark
-            or self._profile.default_benchmark
-        )
+        benchmark_code = config.benchmark_code or context.benchmark or self._profile.default_benchmark
 
         # 根据benchmark_code获取对应的基准数据
         # 优先从benchmark_data查找（指数），然后从stock_data_dict查找（普通股票）
@@ -463,90 +416,82 @@ class BacktestRunner:
             # 如果指定的基准不存在，回退到市场默认基准
             fallback = self._profile.default_benchmark
             actual_benchmark_df = self.benchmark_data.get(fallback, benchmark_df)
-            log.warning(
-                t("bt.benchmark_fallback", code=benchmark_code, fallback=fallback)
-            )
+            log.warning(t("bt.benchmark_fallback", code=benchmark_code, fallback=fallback))
 
         # 生成报告
         report = generate_backtest_report(
-            stats,
-            config.start_date,
-            config.end_date,
+            stats, 
+            config.start_date, 
+            config.end_date, 
             actual_benchmark_df,
-            benchmark_code=benchmark_code,
+            benchmark_code=benchmark_code
         )
 
         # 获取总耗时（仅回测执行时间，不包括数据加载）
-        time_str = get_current_elapsed_time(self, "_execute_backtest")
+        time_str = get_current_elapsed_time(self, '_execute_backtest')
 
         # 打印报告
         print_backtest_report(
-            report,
-            log,
-            config.start_date,
-            config.end_date,
+            report, log,
+            config.start_date, config.end_date,
             time_str,
-            np.array(positions_count),
+            np.array(positions_count)
         )
 
         # 生成图表
         if config.enable_charts:
             chart_benchmark_data = {benchmark_code: actual_benchmark_df}
             generate_backtest_charts(
-                stats,
-                config.start_date,
-                config.end_date,
-                chart_benchmark_data,
-                self._chart_filename,
-                benchmark_code,
-            )
+                stats, config.start_date, config.end_date,
+                chart_benchmark_data, self._chart_filename, benchmark_code)
             print(t("bt.chart_saved", path=self._chart_filename))
 
         if config.enable_logging:
             print(t("bt.log_saved", path=self._log_filename))
 
         report["_stats"] = stats
-        if config.enable_charts and hasattr(self, "_chart_filename"):
+        if config.enable_charts and hasattr(self, '_chart_filename'):
             report["_chart_path"] = self._chart_filename
 
         if config.enable_export:
             from simtradelab.backtest.export import export_to_csv
-
             export_to_csv(report, config.log_dir)
 
         # 基准净值序列（对齐到策略交易日，归一化到1.0起点）
         trade_dates_set = set()
         for d in stats.trade_dates:
-            if hasattr(d, "date"):
+            if hasattr(d, 'date'):
                 trade_dates_set.add(str(d.date()))
-            elif hasattr(d, "strftime"):
-                trade_dates_set.add(str(d.strftime("%Y-%m-%d")))
+            elif hasattr(d, 'strftime'):
+                trade_dates_set.add(str(d.strftime('%Y-%m-%d')))
             else:
                 trade_dates_set.add(str(d))
-
+        
         # 确保 actual_benchmark_df 存在且不为空
         if actual_benchmark_df is not None and not actual_benchmark_df.empty:
             # 筛选基准数据的日期范围
             bm_slice = actual_benchmark_df[
-                (actual_benchmark_df.index >= config.start_date)
-                & (actual_benchmark_df.index <= config.end_date)
+                (actual_benchmark_df.index >= config.start_date) &
+                (actual_benchmark_df.index <= config.end_date)
             ]
-
+            
             # 进一步筛选到策略的交易日
             def get_date_key(d):
-                if hasattr(d, "date"):
+                if hasattr(d, 'date'):
                     return str(d.date())
-                elif hasattr(d, "strftime"):
-                    return str(d.strftime("%Y-%m-%d"))
+                elif hasattr(d, 'strftime'):
+                    return str(d.strftime('%Y-%m-%d'))
                 else:
                     return str(d)
-
-            bm_slice = bm_slice[bm_slice.index.map(get_date_key).isin(trade_dates_set)]
-
+            
+            bm_slice = bm_slice[
+                bm_slice.index.map(get_date_key).isin(trade_dates_set)
+            ]
+            
             if len(bm_slice) > 0:
-                bm_initial = bm_slice["close"].iloc[0]
+                bm_initial = bm_slice['close'].iloc[0]
                 if bm_initial > 0:
-                    report["_benchmark_nav"] = (bm_slice["close"] / bm_initial).tolist()
+                    report["_benchmark_nav"] = (bm_slice['close'] / bm_initial).tolist()
                 else:
                     report["_benchmark_nav"] = []
             else:
