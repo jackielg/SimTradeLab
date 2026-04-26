@@ -87,11 +87,12 @@ class OrderProcessor:
                     if idx < 0:
                         return None
                 else:
-                    # 日线数据：使用date_dict查找
+                    # 日线数据：normalize 到 00:00:00 以匹配数据索引
+                    current_date = current_dt.normalize()
                     date_dict, _ = self.get_stock_date_index(stock)
-                    idx = date_dict.get(current_dt.value)
+                    idx = date_dict.get(current_date.value)
                     if idx is None:
-                        idx = stock_df.index.get_loc(current_dt)
+                        idx = stock_df.index.get_loc(current_date)
 
                 # 成交量检查：volume=0 表示停牌，Ptrade会拒绝订单
                 volume = stock_df['volume'].values[idx]

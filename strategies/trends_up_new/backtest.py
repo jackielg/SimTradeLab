@@ -23,7 +23,7 @@ class ConfigManager:
     """
 
     # 基础配置
-    MAX_POSITIONS = 10  # 最佳配置: 10只+S/A+B级
+    MAX_POSITIONS = 5  # 持仓上限
     BENCHMARK_INDEX = "000300.SS"  # 沪深300作为大盘感知指标
     BUY_TIME = (14, 30)  # 主力买入时间 14:30
 
@@ -220,7 +220,7 @@ class DataCache:
         try:
             content = pickle.dumps(DataCache._cache)
             Common.safe_write_file(ConfigManager.CACHE_FILE, content)
-            log.info("成功保存日线数据 pkl 缓存。")
+            log.debug("成功保存日线数据 pkl 缓存。")
         except Exception as e:
             log.error(f"保存 pkl 缓存失败: {e}")
 
@@ -232,7 +232,7 @@ class DataCache:
             DataCache._cache = {}
             DataCache._current_cache_date = current_date_str
             if old_count > 0:
-                log.info(f"[内存优化] 清理旧缓存，释放 {old_count} 个条目")
+                log.debug("[内存优化] 清理旧缓存，释放 %d 个条目" % old_count)
 
     @staticmethod
     def get_daily_data(stock, count):
@@ -676,7 +676,7 @@ class SelectionAgent:
                 money_threshold = (
                     moneys[money_p30_idx] if money_p30_idx < len(moneys) else moneys[0]
                 )
-                log.info(f"[盘前筛选] Step3 成交额P30: {money_threshold/1e4:.0f}万")
+                log.debug("[盘前筛选] Step3 成交额P30: %.0f万" % (money_threshold/1e4))
 
             for stock, total_cap, float_cap, money_val in stock_cap_data:
                 try:
@@ -1830,7 +1830,7 @@ def before_trading_start(context, data):
 
     DataCache.clear_old_cache(g.current_date_str)
 
-    log.info(f"今日日期: {g.current_date_str}")
+    log.debug("今日日期: %s" % g.current_date_str)
 
 
 def handle_data(context, data):
@@ -1982,7 +1982,7 @@ def after_trading_end(context, data):
             content = content.decode("utf-8")
         content += report_line
         Common.safe_write_file("daily_pnl_report.csv", content)
-        log.info("成功更新盈亏报表 CSV。")
+        log.debug("成功更新盈亏报表 CSV。")
     except Exception as e:
         log.warning(f"更新盈亏报表 CSV 失败: {e}")
 
