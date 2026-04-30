@@ -387,13 +387,21 @@ class PtradeAPI:
             listed = pd.to_datetime(self.data_context.stock_metadata["listed_date"], format="mixed") <= target_date
 
         if self.data_context.de_listed_date_ts is not None:
-            not_delisted = (self.data_context.stock_metadata["de_listed_date"] == "2900-01-01") | (
-                self.data_context.de_listed_date_ts > target_date
+            not_delisted = (
+                self.data_context.stock_metadata["de_listed_date"].isna()
+                | (self.data_context.stock_metadata["de_listed_date"] == "2900-01-01")
+                | (self.data_context.de_listed_date_ts > target_date)
             )
         else:
-            not_delisted = (self.data_context.stock_metadata["de_listed_date"] == "2900-01-01") | (
-                pd.to_datetime(self.data_context.stock_metadata["de_listed_date"], errors="coerce", format="mixed")
-                > target_date
+            not_delisted = (
+                self.data_context.stock_metadata["de_listed_date"].isna()
+                | (self.data_context.stock_metadata["de_listed_date"] == "2900-01-01")
+                | (
+                    pd.to_datetime(
+                        self.data_context.stock_metadata["de_listed_date"],
+                        errors="coerce", format="mixed"
+                    ) > target_date
+                )
             )
 
         return self.data_context.stock_metadata[listed & not_delisted].index.tolist()

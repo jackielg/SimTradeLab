@@ -72,7 +72,11 @@ class DataContext:
             else:
                 self.listed_date_ts = None
             if 'de_listed_date' in stock_metadata.columns:
+                # 空日期视为"未退市"（pd.NaT > date 比较为False，需用mask处理）
                 self.de_listed_date_ts = pd.to_datetime(stock_metadata['de_listed_date'], format='mixed', errors='coerce')
+                empty_mask = stock_metadata['de_listed_date'].isna() | (stock_metadata['de_listed_date'] == '')
+                if hasattr(self.de_listed_date_ts, 'where'):
+                    self.de_listed_date_ts = self.de_listed_date_ts.where(~empty_mask, other=pd.Timestamp('2900-01-01'))
             else:
                 self.de_listed_date_ts = None
         else:

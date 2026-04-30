@@ -192,9 +192,17 @@ def _load_metadata_parquet(metadata_dir, base_name):
     df = pd.read_parquet(file_path)
 
     if base_name == "trade_days":
-        return {"trade_days": _date_to_iso(df["date"]).tolist()}
+        col = "date" if "date" in df.columns else "trade_date"
+        return {"trade_days": _date_to_iso(df[col]).tolist()}
 
     elif base_name == "stock_metadata":
+        # Rename BaoStock/raw column names to PTrade-standard names
+        rename_map = {
+            "ipoDate": "listed_date",
+            "outDate": "de_listed_date",
+            "code_name": "stock_name",
+        }
+        df = df.rename(columns={k: v for k, v in rename_map.items() if k in df.columns})
         return {"data": df.to_dict("records")}
 
     elif base_name == "benchmark":
