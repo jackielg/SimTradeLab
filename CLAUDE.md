@@ -29,6 +29,13 @@ Python >=3.10, Poetry, Ruff (lint), Pydantic (config), src/ layout
 - StrategyDataAnalyzer 用 AST 分析策略数据依赖，按需加载 Parquet
 - 策略生命周期 hooks: initialize, handle_data, before_trading_start, after_trading_end
 
+## Pitfalls（已踩坑记录）
+- BaoStock parquet 的 date 索引为 datetime64[us]（微秒），而 pd.Timestamp.value 为纳秒，两者 view("i8") 差 1000 倍。所有 date_dict.get(ts.value) 查找前必须统一精度为 datetime64[ns]
+- pd.Timestamp 上限约 2262-04-11（nanosecond 精度），不可使用 2900-01-01 等远未来日期作为占位值
+- 分钟级回测中 get_history(frequency="1d") 需将 current_dt.normalize() 截断到日期再查找日线索引
+- get_history(is_dict=True) 返回 {stock: DataFrame}（含日期索引），不是 {stock: {field: ndarray}}
+- valuation parquet 仅含 pe_ttm/pb/ps_ttm/pcf/turnover_rate，不含 total_shares/a_floats（在 fundamentals 中）。get_fundamentals("valuation", ["total_shares"]) 返回空数据
+
 ## Out of Scope
 - 不修改 docs/ 下的参考文档
 - 不自动推送到远程仓库
