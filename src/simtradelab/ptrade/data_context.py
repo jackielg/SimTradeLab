@@ -76,7 +76,7 @@ class DataContext:
                 self.de_listed_date_ts = pd.to_datetime(stock_metadata['de_listed_date'], format='mixed', errors='coerce')
                 empty_mask = stock_metadata['de_listed_date'].isna() | (stock_metadata['de_listed_date'] == '')
                 if hasattr(self.de_listed_date_ts, 'where'):
-                    self.de_listed_date_ts = self.de_listed_date_ts.where(~empty_mask, other=pd.Timestamp('2900-01-01'))
+                    self.de_listed_date_ts = self.de_listed_date_ts.where(~empty_mask, other=pd.Timestamp('2262-01-01'))
             else:
                 self.de_listed_date_ts = None
         else:

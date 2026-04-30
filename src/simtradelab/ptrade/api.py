@@ -389,13 +389,13 @@ class PtradeAPI:
         if self.data_context.de_listed_date_ts is not None:
             not_delisted = (
                 self.data_context.stock_metadata["de_listed_date"].isna()
-                | (self.data_context.stock_metadata["de_listed_date"] == "2900-01-01")
+                | (self.data_context.stock_metadata["de_listed_date"] == "2262-01-01")
                 | (self.data_context.de_listed_date_ts > target_date)
             )
         else:
             not_delisted = (
                 self.data_context.stock_metadata["de_listed_date"].isna()
-                | (self.data_context.stock_metadata["de_listed_date"] == "2900-01-01")
+                | (self.data_context.stock_metadata["de_listed_date"] == "2262-01-01")
                 | (
                     pd.to_datetime(
                         self.data_context.stock_metadata["de_listed_date"],
@@ -1328,9 +1328,11 @@ class PtradeAPI:
                     current_idx = idx
                 else:
                     date_dict, _ = self.get_stock_date_index(stock)
-                    current_idx = date_dict.get(current_dt.value)
+                    # 分钟级回测时，日线索引需截断到日期级别
+                    lookup_dt = current_dt.normalize() if current_dt != current_dt.normalize() else current_dt
+                    current_idx = date_dict.get(lookup_dt.value)
                     if current_idx is None:
-                        current_idx = data_source.index.get_loc(current_dt)
+                        current_idx = data_source.index.get_loc(lookup_dt)
                 stock_info[stock] = (data_source, current_idx)
             except (KeyError, IndexError):
                 continue
@@ -1418,11 +1420,25 @@ class PtradeAPI:
             self.log.debug(t("api.get_history_empty", stocks=security_list, count=count, frequency=frequency, fq=fq))
             final_result = {} if is_dict else pd.DataFrame()
         elif is_dict:
-            # 兼容历史测试契约：{stock: {field: ndarray}}
+            # PTrade兼容：{stock: DataFrame}（含日期索引）
             final_result = OrderedDict()
             for stock in stocks:
-                if stock in result:
-                    final_result[stock] = result[stock]
+                if stock in result and stock in stock_info:
+                    stock_result = result[stock]
+                    if isinstance(stock_result, dict):
+                        data_source, current_idx = stock_info[stock]
+                        if include:
+                            s = max(0, current_idx - count + 1)
+                            e = current_idx + 1
+                        else:
+                            s = max(0, current_idx - count)
+                            e = current_idx
+                            if e == 0 and current_idx == 0:
+                                e = 1
+                        idx = data_source.index[s:e]
+                        final_result[stock] = pd.DataFrame(stock_result, index=idx)
+                    else:
+                        final_result[stock] = stock_result
         else:
             is_single_stock = isinstance(security_list, str)
             stocks_list = [security_list] if is_single_stock else stocks
@@ -1541,7 +1557,7 @@ class PtradeAPI:
             if "listed_date" in field and "listed_date" not in stock_info:
                 stock_info["listed_date"] = "2010-01-01"
             if "de_listed_date" in field and "de_listed_date" not in stock_info:
-                stock_info["de_listed_date"] = "2900-01-01"
+                stock_info["de_listed_date"] = "2262-01-01"
 
             result[stock] = stock_info
 
