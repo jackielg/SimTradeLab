@@ -7,7 +7,7 @@
 Python >=3.10, Poetry, Ruff (lint), Pydantic (config), src/ layout
 
 ## Commands
-- Backtest: `SIMTRADELAB_DATA_PATH=../SimTradeData/data/cn python3 src/simtradelab/backtest/run_backtest.py --strategy <name> --start YYYY-MM-DD --end YYYY-MM-DD --frequency 1m`
+- Backtest: `SIMTRADELAB_DATA_PATH=../SimTradeData/data python3 src/simtradelab/backtest/run_backtest.py --strategy <name> --start YYYY-MM-DD --end YYYY-MM-DD --frequency 1m`
 - Backtest (Windows): `set SIMTRADELAB_DATA_PATH=..\SimTradeData\data\cn && python src/simtradelab/backtest/run_backtest.py --strategy <name> --start YYYY-MM-DD --end YYYY-MM-DD --frequency 1m`
 - Test unit: `python3 -m pytest tests/unit/ -v`
 - Test integration: `python3 -m pytest tests/integration/ -v`
