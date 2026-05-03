@@ -2757,7 +2757,7 @@ def on_trade_response(context, trade_list):
             content += record_line
             Common.safe_write_file("交易详情_trends_up.csv", content.encode("gbk"))
             log.info(
-                "[PnL_Update] {} {}: qty={} price={:.4f} fees={:.4f}".format(
+                "[PnL_Update] {} {}: qty={:.0f} price={:.2f} fees={:.2f}".format(
                     stock, action_str, abs(amount), price, commission
                 )
             )
