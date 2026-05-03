@@ -76,5 +76,6 @@ data*/
 .claude
 *.ipynb
 research/trends_up_cache.pkl
-strategies/trends_up/optimization/
+strategies/trends_up/optimization/results/
+strategies/trends_up/optimization/optimization_output.log
 strategies/trends_up/stats/
