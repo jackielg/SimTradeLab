@@ -565,7 +565,7 @@ class StrategyExecutionEngine:
         global _current_backtest_date
 
         # before_trading_start
-        self.context.current_dt = data.current_dt.replace(hour=8, minute=30, second=0)
+        self.context.current_dt = data.current_date.replace(hour=8, minute=30, second=0)
         _current_backtest_date = self.context.current_dt.strftime("%Y-%m-%d %H:%M:%S")
         before_data = data.__class__(self.context.current_dt, self.context.portfolio._bt_ctx)
         if not self._safe_call(
@@ -574,7 +574,7 @@ class StrategyExecutionEngine:
             return False
 
         # handle_data
-        self.context.current_dt = data.current_dt.replace(hour=15, minute=0, second=0)
+        self.context.current_dt = data.current_date.replace(hour=15, minute=0, second=0)
         _current_backtest_date = self.context.current_dt.strftime("%Y-%m-%d %H:%M:%S")
         handle_data_obj = data.__class__(self.context.current_dt, self.context.portfolio._bt_ctx)
         if not self._safe_call("handle_data", LifecyclePhase.HANDLE_DATA, handle_data_obj):
@@ -584,7 +584,7 @@ class StrategyExecutionEngine:
         self._fire_callbacks()
 
         # after_trading_end（允许失败）
-        self.context.current_dt = data.current_dt.replace(hour=15, minute=30, second=0)
+        self.context.current_dt = data.current_date.replace(hour=15, minute=30, second=0)
         _current_backtest_date = self.context.current_dt.strftime("%Y-%m-%d %H:%M:%S")
         after_data = data.__class__(self.context.current_dt, self.context.portfolio._bt_ctx)
         self._safe_call(

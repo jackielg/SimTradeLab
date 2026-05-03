@@ -360,6 +360,7 @@ class StrategyOptimizer:
         use_optimal_stopping: bool = DEFAULT_USE_OPTIMAL_STOPPING,
         patience: int = DEFAULT_PATIENCE,
         verbose: bool = False,
+        frequency: str = "1d",
     ):
         """初始化优化器
 
@@ -380,6 +381,7 @@ class StrategyOptimizer:
             use_optimal_stopping: 是否启用早停（默认True）
             patience: 无改进容忍次数，连续patience次trial无改进则停止（默认50）
             verbose: 是否输出详细调试信息（默认False）
+            frequency: 回测频率，'1d'日线或'1m'分钟线（默认'1d'）
         """
         self.strategy_path = Path(strategy_path)
         self.parameter_space = parameter_space
@@ -401,6 +403,7 @@ class StrategyOptimizer:
         self.use_optimal_stopping = use_optimal_stopping
         self.patience = patience
         self.verbose = verbose
+        self.frequency = frequency
 
         # 计算参数空间大小
         self.space_size = parameter_space.calculate_space_size()
@@ -507,6 +510,7 @@ class StrategyOptimizer:
                 start_date=start_date or self.start_date,
                 end_date=end_date or self.end_date,
                 initial_capital=self.initial_capital,
+                frequency=self.frequency,
                 enable_logging=False,
                 enable_charts=False,
                 optimization_mode=True

@@ -569,15 +569,16 @@ class SelectionAgent:
         结果保存在 g.long_term_candidates
         """
         log.info("[盘前预筛选] 开始长期趋势筛选...")
+        t_start = datetime.datetime.now()
         candidates = get_Ashares()
         if not candidates:
             log.error("初始股票池为空，跳过筛选")
             g.long_term_candidates = []
             return
-
-        log.info(f"[盘前筛选] 1️⃣ Step1 - 股票池初始化: 待处理股票 {len(candidates)} 只")
+        log.info(f"[盘前筛选] 1️⃣ Step1 - 股票池初始化: 待处理股票 {len(candidates)} 只, 耗时 {(datetime.datetime.now() - t_start).total_seconds():.1f}秒")
 
         # Step2: 异常股过滤（停牌/退市/北交所/科创板，保留ST）
+        t_step2 = datetime.datetime.now()
         step2_candidates = [
             stock
             for stock in candidates
@@ -589,7 +590,7 @@ class SelectionAgent:
         ]
 
         log.info(
-            f"[盘前筛选] 2️⃣ Step2 - 异常股过滤（科创/北交等）: 待处理股票 {len(step2_candidates)} 只"
+            f"[盘前筛选] 2️⃣ Step2 - 异常股过滤（科创/北交等）: 待处理股票 {len(step2_candidates)} 只, 耗时 {(datetime.datetime.now() - t_step2).total_seconds():.1f}秒"
         )
 
         # 数据预加载优化
@@ -602,32 +603,37 @@ class SelectionAgent:
         log.info(f"[数据预加载] 完成，耗时 {preload_elapsed:.1f}秒")
 
         # Step3: 财务过滤（市值约束）- 分位数动态过滤版 V4
+        t_step3 = datetime.datetime.now()
         step3_candidates, step3_fallback_count, step3_stats = (
             SelectionAgent._filter_by_market_cap(step2_candidates)
         )
 
         log.info(
-            f"[盘前筛选] 3️⃣ Step3 - 财务过滤（市值约束）: 待处理股票 {len(step3_candidates)} 只"
+            f"[盘前筛选] 3️⃣ Step3 - 财务过滤（市值约束）: 待处理股票 {len(step3_candidates)} 只, 耗时 {(datetime.datetime.now() - t_step3).total_seconds():.1f}秒"
         )
 
         # Step4: 股价预过滤
+        t_step4 = datetime.datetime.now()
         step4_candidates = SelectionAgent._filter_by_price(step3_candidates)
 
         log.info(
-            f"[盘前筛选] 4️⃣ Step4 - 股价预过滤: 待处理股票 {len(step4_candidates)} 只"
+            f"[盘前筛选] 4️⃣ Step4 - 股价预过滤: 待处理股票 {len(step4_candidates)} 只, 耗时 {(datetime.datetime.now() - t_step4).total_seconds():.1f}秒"
         )
 
         # Step5: 趋势初筛增强
+        t_step5 = datetime.datetime.now()
         step5_candidates = SelectionAgent._filter_by_trend(step4_candidates)
 
         log.info(
-            f"[盘前筛选] 5️⃣ Step5 - 技术面初筛（多条件趋势确认）: 待处理股票 {len(step5_candidates)} 只"
+            f"[盘前筛选] 5️⃣ Step5 - 技术面初筛（多条件趋势确认）: 待处理股票 {len(step5_candidates)} 只, 耗时 {(datetime.datetime.now() - t_step5).total_seconds():.1f}秒"
         )
+        t_step6 = datetime.datetime.now()
         log.info(
-            f"[盘前筛选] 6️⃣ Step6 - 月线趋势确认: 待处理股票 {len(step5_candidates)} 只"
+            f"[盘前筛选] 6️⃣ Step6 - 月线趋势确认: 待处理股票 {len(step5_candidates)} 只, 耗时 {(datetime.datetime.now() - t_step6).total_seconds():.1f}秒"
         )
+        t_step7 = datetime.datetime.now()
         log.info(
-            f"[盘前筛选] 7️⃣ Step7 - 预选池最终确认: 最终股票 {len(step5_candidates)} 只"
+            f"[盘前筛选] 7️⃣ Step7 - 预选池最终确认: 最终股票 {len(step5_candidates)} 只, 耗时 {(datetime.datetime.now() - t_step7).total_seconds():.1f}秒"
         )
 
         g.long_term_candidates = step5_candidates
@@ -942,7 +948,7 @@ class SelectionAgent:
         step4_candidates = []
         for stock in step3_candidates:
             try:
-                df = DataCache.get_daily_data(stock, 30)
+                df = DataCache.get_daily_data(stock, 65)
                 if df.empty or len(df) < 5:
                     step4_candidates.append(stock)
                     continue
@@ -2065,7 +2071,10 @@ class ReportAgent:
             if callable(fn):
                 for s, _ in active:
                     try:
-                        name_map[s] = fn(s) or s
+                        name = fn(s)
+                        if isinstance(name, dict):
+                            name = list(name.values())[0] if name else s
+                        name_map[s] = name or s
                     except Exception:
                         name_map[s] = s
             else:
@@ -2200,9 +2209,25 @@ class ReportAgent:
             start_date = stats["start_date"]
             end_date = stats["end_date"]
 
-            # 获取期初/期末价格
-            start_price = ReportAgent._get_price_at(stock, start_date)
-            end_price = ReportAgent._get_price_at(stock, end_date)
+            # 期初价=加权平均买入价，期末价=加权平均卖出价（已卖）或当前收盘价（持仓）
+            buy_trades = stats["buys"]
+            if buy_trades:
+                total_amount = sum(t["amount"] for t in buy_trades)
+                start_price = sum(t["price"] * t["amount"] for t in buy_trades) / total_amount if total_amount > 0 else 0.0
+            else:
+                start_price = 0.0
+
+            sell_trades = stats["sells"]
+            is_holding = stock in current_positions and current_positions[stock].amount > 0
+            if is_holding:
+                df = DataCache.get_daily_data(stock, 5)
+                end_price = float(df["close"].iloc[-1]) if not df.empty else start_price
+            elif sell_trades:
+                total_sell_amount = sum(t["amount"] for t in sell_trades)
+                end_price = sum(t["price"] * t["amount"] for t in sell_trades) / total_sell_amount if total_sell_amount > 0 else start_price
+            else:
+                end_price = start_price
+
             price_change = end_price - start_price
             pct_change = (price_change / start_price) if start_price > 1e-6 else 0.0
 
@@ -2262,7 +2287,10 @@ class ReportAgent:
             if callable(fn):
                 for s in stocks:
                     try:
-                        name_map[s] = fn(s) or s
+                        name = fn(s)
+                        if isinstance(name, dict):
+                            name = list(name.values())[0] if name else s
+                        name_map[s] = name or s
                     except Exception:
                         name_map[s] = s
             else:
@@ -2641,6 +2669,11 @@ def on_order_response(context, trade_list):
         if stock == "Unknown":
             stock = get_order_field(order, "stock_code", "Unknown")
 
+        if ".XSHE" in stock:
+            stock = stock.replace(".XSHE", ".SZ")
+        elif ".XSHG" in stock:
+            stock = stock.replace(".XSHG", ".SS")
+
         status = get_order_field(order, "status", "Unknown")
 
         filled = get_order_field(order, "filled", None)
@@ -2668,6 +2701,12 @@ def on_trade_response(context, trade_list):
         stock = get_trade_field(trade, "symbol", "Unknown")
         if stock == "Unknown":
             stock = get_trade_field(trade, "stock_code", "Unknown")
+
+        # PTrade 成交响应使用 .XSHE/.XSHG 后缀，统一转换为 .SZ/.SS
+        if ".XSHE" in stock:
+            stock = stock.replace(".XSHE", ".SZ")
+        elif ".XSHG" in stock:
+            stock = stock.replace(".XSHG", ".SS")
 
         price = get_trade_field(trade, "business_price", None)
         if price is None:
