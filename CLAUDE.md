@@ -39,6 +39,7 @@ Python >=3.10, Poetry, Ruff (lint), Pydantic (config), src/ layout
 - get_history(is_dict=True) 返回 {stock: DataFrame}（含日期索引），不是 {stock: {field: ndarray}}
 - valuation parquet 仅含 pe_ttm/pb/ps_ttm/pcf/turnover_rate，不含 total_shares/a_floats（在 fundamentals 中）。get_fundamentals("valuation", ["total_shares"]) 返回空数据
 - get_fundamentals("valuation", ["total_shares", "a_floats"]) 返回空数据（这些字段在 fundamentals 中而非 valuation 中），策略 Step3 市值过滤会全部降级为日线估算
+- get_fundamentals 的表名在 SimTradeLab 和 PTrade 间不完全一致。SimTradeLab 支持 `capital_structure`（自定义），PTrade 不支持该表名（报 invalid table argument）。PTrade 支持的表含 `share_change`。策略中获取股本数据(total_shares/a_floats)时须依次尝试两个表名，兼容双环境
 
 ## Out of Scope
 - 不修改 docs/ 下的参考文档

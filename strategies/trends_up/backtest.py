@@ -190,6 +190,41 @@ class Common:
             except Exception:
                 pass
 
+    @staticmethod
+    def get_display_width(s):
+        w = 0
+        for c in str(s):
+            if ord(c) > 127:
+                w += 2
+            else:
+                w += 1
+        return w
+
+    @staticmethod
+    def pad_string(s, width, align="<"):
+        s = str(s)
+        d_w = Common.get_display_width(s)
+        padding = max(0, width - d_w)
+        if align == "<":
+            return s + " " * padding
+        elif align == ">":
+            return " " * padding + s
+        else:
+            l_pad = padding // 2
+            r_pad = padding - l_pad
+            return " " * l_pad + s + " " * r_pad
+
+    @staticmethod
+    def get_stock_name_safe(stock):
+        try:
+            fn = globals().get("get_stock_name")
+            if callable(fn):
+                name = fn(stock) if isinstance(stock, str) else stock
+                return {stock: name} if name else {stock: stock}
+        except Exception:
+            pass
+        return {stock: stock} if isinstance(stock, str) else {s: s for s in stock}
+
 
 # ==========================================
 # 3. DataCache: 数据缓存机制与接口封装
@@ -199,6 +234,8 @@ class DataCache:
 
     _cache = {}
     _current_cache_date = ""
+    _valuation_cache = None
+    _valuation_cache_date = ""
 
     @staticmethod
     def load_pkl_cache():
@@ -231,6 +268,8 @@ class DataCache:
             old_count = len(DataCache._cache)
             DataCache._cache = {}
             DataCache._current_cache_date = current_date_str
+            DataCache._valuation_cache = None
+            DataCache._valuation_cache_date = ""
             if old_count > 0:
                 log.debug("[内存优化] 清理旧缓存，释放 %d 个条目" % old_count)
 
@@ -329,6 +368,54 @@ class DataCache:
                             DataCache._cache[f"{stock}_{count}_False_{today_str}"] = (
                                 stock_data
                             )
+
+    @staticmethod
+    def get_valuation_data(stocks, query_date):
+        """批量获取估值数据（PTrade valuation 表），带日级缓存"""
+        if (
+            DataCache._valuation_cache_date == query_date
+            and DataCache._valuation_cache is not None
+        ):
+            cached = DataCache._valuation_cache
+            available = [s for s in stocks if s in cached.index]
+            if available:
+                return cached.loc[available]
+
+        batch_size = 500
+        all_data = []
+        for i in range(0, len(stocks), batch_size):
+            batch = stocks[i : i + batch_size]
+            try:
+                data = get_fundamentals(
+                    batch,
+                    "valuation",
+                    [
+                        "total_value",
+                        "float_value",
+                        "total_shares",
+                        "a_floats",
+                        "turnover_rate",
+                    ],
+                    query_date,
+                )
+                if data is not None and not data.empty:
+                    all_data.append(data)
+            except Exception:
+                continue
+
+        if all_data:
+            combined = pd.concat(all_data)
+            combined = combined[~combined.index.duplicated(keep="first")]
+            if (
+                "total_value" in combined.columns
+                and combined["total_value"].notna().any()
+            ):
+                DataCache._valuation_cache = combined
+                DataCache._valuation_cache_date = query_date
+                available = [s for s in stocks if s in combined.index]
+                if available:
+                    return combined.loc[available]
+        return None
 
     @staticmethod
     def get_5m_data(stock, count):
@@ -546,8 +633,34 @@ class SelectionAgent:
         g.long_term_candidates = step5_candidates
 
     @staticmethod
+    def _get_capital_data(batch_stocks, query_date):
+        """获取股本数据（兼容 PTrade valuation 和 SimTradeLab 股本表）"""
+        try:
+            data = get_fundamentals(
+                batch_stocks,
+                "valuation",
+                ["total_shares", "a_floats"],
+                query_date,
+            )
+            if data is not None and not data.empty:
+                if "total_shares" in data.columns:
+                    return data
+        except Exception:
+            pass
+        for table_name in ["capital_structure", "share_change"]:
+            try:
+                data = get_fundamentals(
+                    batch_stocks, table_name, ["total_shares", "a_floats"], query_date
+                )
+                if data is not None and not data.empty:
+                    return data
+            except Exception:
+                continue
+        return None
+
+    @staticmethod
     def _filter_by_market_cap(step2_candidates):
-        """Step3: 财务过滤（市值约束）"""
+        """Step3: 财务过滤（市值约束）- 向量化优化版"""
         step3_candidates = []
         step3_fallback_count = 0
         step3_stats = {
@@ -559,6 +672,35 @@ class SelectionAgent:
             "fallback_used": 0,
         }
 
+        if hasattr(g, "current_dt"):
+            query_date = g.current_dt.strftime("%Y%m%d")
+        else:
+            query_date = datetime.datetime.now().strftime("%Y%m%d")
+
+        # === PTrade 向量化路径：从 valuation 表直接获取市值 ===
+        val_df = DataCache.get_valuation_data(step2_candidates, query_date)
+        if (
+            val_df is not None
+            and not val_df.empty
+            and "total_value" in val_df.columns
+            and val_df["total_value"].notna().any()
+        ):
+            log.info(
+                f"[盘前筛选] Step3 使用 valuation 向量化路径，"
+                f"获取 {len(val_df)} 只股票的市值数据"
+            )
+            step3_candidates, step3_stats = (
+                SelectionAgent._filter_cap_vectorized(val_df, step3_stats)
+            )
+            log.info(
+                f"[盘前筛选] Step3 诊断（向量化）: "
+                f"检查{step3_stats['total_checked']}只, "
+                f"过滤{step3_stats['filtered_percentile']+step3_stats['filtered_absolute']}只, "
+                f"最终 {len(step3_candidates)} 只"
+            )
+            return step3_candidates, 0, step3_stats
+
+        # === SimTradeLab 回退路径：逐批获取股本数据 ===
         stock_cap_data = []
         batch_size = 100
         daily_data_cache = {}
@@ -572,14 +714,7 @@ class SelectionAgent:
             batch_stocks = step2_candidates[start_idx:end_idx]
 
             try:
-                if hasattr(g, "current_dt"):
-                    query_date = g.current_dt.strftime("%Y%m%d")
-                else:
-                    query_date = datetime.datetime.now().strftime("%Y%m%d")
-
-                fundamentals = get_fundamentals(
-                    batch_stocks, "capital_structure", ["total_shares", "a_floats"], query_date
-                )
+                fundamentals = SelectionAgent._get_capital_data(batch_stocks, query_date)
 
                 if fundamentals is None or fundamentals.empty:
                     log.info(
@@ -676,7 +811,7 @@ class SelectionAgent:
                 money_threshold = (
                     moneys[money_p30_idx] if money_p30_idx < len(moneys) else moneys[0]
                 )
-                log.debug("[盘前筛选] Step3 成交额P30: %.0f万" % (money_threshold/1e4))
+                log.debug("[盘前筛选] Step3 成交额P30: %.0f万" % (money_threshold / 1e4))
 
             for stock, total_cap, float_cap, money_val in stock_cap_data:
                 try:
@@ -729,6 +864,56 @@ class SelectionAgent:
             )
 
         return step3_candidates, step3_fallback_count, step3_stats
+
+    @staticmethod
+    def _filter_cap_vectorized(val_df, step3_stats):
+        """向量化市值过滤（PTrade valuation 表路径）"""
+        valid_mask = val_df["total_value"].notna() & (val_df["total_value"] > 0)
+        val_df = val_df[valid_mask].copy()
+
+        if val_df.empty:
+            return [], step3_stats
+
+        if "float_value" not in val_df.columns:
+            val_df["float_value"] = val_df["total_value"]
+        else:
+            val_df["float_value"] = val_df["float_value"].fillna(val_df["total_value"])
+
+        total_values = val_df["total_value"].values
+        float_values = val_df["float_value"].values
+
+        sorted_caps = np.sort(total_values)
+        n_caps = len(sorted_caps)
+        cap_p20 = sorted_caps[int(n_caps * 0.2)]
+        cap_p80 = sorted_caps[int(n_caps * 0.8)]
+
+        abs_min = ConfigManager.FILTER_CAPITAL["MIN_TOTAL_CAPITAL"]
+        abs_max = ConfigManager.FILTER_CAPITAL["MAX_TOTAL_CAPITAL"]
+
+        final_min = max(cap_p20, abs_min * 0.5)
+        final_min_abs = min(cap_p20, abs_min)
+        final_max = min(cap_p80, abs_max * 1.5)
+        max_float = ConfigManager.FILTER_CAPITAL["MAX_FLOAT_CAPITAL"]
+
+        log.info(
+            f"[盘前筛选] Step3 市值分位数: P20={cap_p20/1e8:.1f}亿, "
+            f"P80={cap_p80/1e8:.1f}亿, "
+            f"有效范围[{final_min/1e8:.1f},{final_max/1e8:.1f}]亿"
+        )
+
+        mask = (
+            (total_values >= final_min)
+            & (total_values <= final_max)
+            & (total_values >= final_min_abs)
+            & (total_values <= abs_max * 2)
+            & (float_values <= max_float)
+        )
+
+        filtered = val_df[mask]
+        step3_stats["total_checked"] = len(val_df)
+        step3_stats["filtered_percentile"] = int(np.sum(~mask))
+
+        return filtered.index.tolist(), step3_stats
 
     @staticmethod
     def _fallback_cap_estimation(stock, df_stock=None):
@@ -1059,11 +1244,6 @@ class SelectionAgent:
 
             if grade in ["S", "A", "B"]:
                 scored_stocks.append((stock, final_score, grade))
-                if grade != "B":
-                    log.info(
-                        f"[选股分级] {stock}: [{grade}级] 得分{final_score:.3f}, "
-                        f"满足{met_count}/4条件"
-                    )
 
         # 按得分降序排列，返回 Top N 个结果（🆕 使用动态上限）
         scored_stocks.sort(key=lambda x: x[1], reverse=True)
@@ -1783,7 +1963,458 @@ class PositionAgent:
 
 
 # ==========================================
-# 7. 全局生命周期函数 (PTrade 接口)
+# 7. ReportAgent: 盘后报表生成（复刻v0.36格式）
+# ==========================================
+class ReportAgent:
+    """盘后报表生成，输出账户汇总、持仓明细、盈亏统计、持仓评分"""
+
+    SEP = "=" * 135
+    LINE_SEP = "-" * 135
+    STAR_SEP = "*" * 135
+
+    POS_HW = {
+        "股票代码": 10, "股票名称": 13, "当日盈亏": 13, "累计盈亏": 13,
+        "持仓市值": 14, "浮动盈亏": 14, "持股数量": 11, "持股天数": 11,
+        "成本价": 10, "当前价": 10, "持仓比例": 12, "策略": 11,
+    }
+    POS_RW = {
+        "股票代码": 9, "股票名称": 13, "当日盈亏": 12, "累计盈亏": 12,
+        "持仓市值": 14, "浮动盈亏": 12, "持股数量": 10, "持股天数": 10,
+        "成本价": 10, "当前价": 10, "持仓比例": 12, "策略": 11,
+    }
+    PNL_HW = {
+        "代码": 9, "开始日期": 11, "结束日期": 11, "期初价": 10,
+        "期末价": 9, "价格变动": 10, "涨跌幅": 10, "盈利次数": 12,
+        "亏损次数": 11, "盈利金额": 12, "亏损金额": 13, "手续费": 10, "盈亏统计": 14,
+    }
+    PNL_RW = {
+        "代码": 9, "开始日期": 10, "结束日期": 10, "期初价": 9,
+        "期末价": 9, "价格变动": 9, "涨跌幅": 10, "盈利次数": 10,
+        "亏损次数": 10, "盈利金额": 12, "亏损金额": 12, "手续费": 10, "盈亏统计": 12,
+    }
+
+    @staticmethod
+    def generate_daily_reports(context):
+        """生成账户汇总 + 持仓明细表"""
+        positions = context.portfolio.positions
+        portfolio_value = context.portfolio.portfolio_value
+        cash = context.portfolio.cash
+        positions_value = portfolio_value - cash
+
+        starting_cash = getattr(context.portfolio, "starting_cash", portfolio_value)
+        total_pnl = portfolio_value - starting_cash
+        total_pnl_pct = (total_pnl / starting_cash * 100) if starting_cash > 0 else 0
+
+        total_daily_pnl = 0.0
+        daily_pnl_map = {}
+
+        for stock, pos in positions.items():
+            if pos.amount <= 0:
+                continue
+            df = DataCache.get_daily_data(stock, 5)
+            if not df.empty and len(df) >= 2:
+                current_price = df["close"].iloc[-1]
+                prev_close = df["close"].iloc[-2]
+                dp = (current_price - prev_close) * pos.amount
+                daily_pnl_map[stock] = dp
+                total_daily_pnl += dp
+
+        total_daily_pnl_pct = (total_daily_pnl / positions_value * 100) if positions_value > 0 else 0
+        position_level = (positions_value / portfolio_value * 100) if portfolio_value > 0 else 0
+
+        log.info(ReportAgent.SEP)
+        log.info(
+            "总资产：{:>10.2f}               总盈亏：{:>10.2f}（{:>6.2f}%）"
+            "         当日参考盈亏：{:>8.2f}（{:>5.2f}%）".format(
+                portfolio_value, total_pnl, total_pnl_pct, total_daily_pnl, total_daily_pnl_pct
+            )
+        )
+        log.info(
+            "总市值：{:>10.2f}               可用资金：{:>10.2f}"
+            "                  当日仓位水平：{:>6.2f}%".format(
+                positions_value, cash, position_level
+            )
+        )
+        log.info(ReportAgent.LINE_SEP)
+
+        if not positions or not any(p.amount > 0 for p in positions.values()):
+            log.info("当前无持仓")
+            return
+
+        hw = ReportAgent.POS_HW
+        header_line = (
+            Common.pad_string("股票代码", hw["股票代码"], ">")
+            + Common.pad_string("股票名称", hw["股票名称"], ">")
+            + Common.pad_string("当日盈亏", hw["当日盈亏"], ">")
+            + Common.pad_string("累计盈亏", hw["累计盈亏"], ">")
+            + Common.pad_string("持仓市值", hw["持仓市值"], ">")
+            + Common.pad_string("浮动盈亏", hw["浮动盈亏"], ">")
+            + Common.pad_string("持股数量", hw["持股数量"], ">")
+            + Common.pad_string("持股天数", hw["持股天数"], ">")
+            + Common.pad_string("成本价", hw["成本价"], ">")
+            + Common.pad_string("当前价", hw["当前价"], ">")
+            + Common.pad_string("持仓比例", hw["持仓比例"], ">")
+            + Common.pad_string("策略", hw["策略"], ">")
+        )
+        log.info(header_line)
+
+        active = [(s, p) for s, p in positions.items() if p.amount > 0]
+        name_map = {}
+        try:
+            fn = globals().get("get_stock_name")
+            if callable(fn):
+                for s, _ in active:
+                    try:
+                        name_map[s] = fn(s) or s
+                    except Exception:
+                        name_map[s] = s
+            else:
+                name_map = {s: s for s, _ in active}
+        except Exception:
+            name_map = {s: s for s, _ in active}
+
+        rw = ReportAgent.POS_RW
+        for stock, pos in active:
+            entry_price = pos.cost_basis
+            df = DataCache.get_daily_data(stock, 5)
+            current_price = df["close"].iloc[-1] if not df.empty else entry_price
+            position_value = pos.amount * current_price
+
+            daily_pnl = daily_pnl_map.get(stock, 0.0)
+            total_pnl_stock = position_value - (entry_price * pos.amount)
+            total_pnl_pct_stock = ((current_price - entry_price) / entry_price * 100) if entry_price > 0 else 0
+
+            holding_days = 0
+            if hasattr(g, "_holding_start_date") and stock in g._holding_start_date:
+                hd = g._holding_start_date[stock]
+                holding_days = (context.current_dt.date() - hd).days if hasattr(hd, "days") else (context.current_dt.date() - hd).days
+
+            position_pct = (position_value / portfolio_value * 100) if portfolio_value > 0 else 0
+            stock_name = name_map.get(stock, stock)
+
+            row_line = (
+                Common.pad_string(stock, rw["股票代码"], ">")
+                + Common.pad_string(stock_name, rw["股票名称"], ">")
+                + Common.pad_string("{:.2f}".format(daily_pnl), rw["当日盈亏"], ">")
+                + Common.pad_string("{:.2f}".format(total_pnl_stock), rw["累计盈亏"], ">")
+                + Common.pad_string("{:.2f}".format(position_value), rw["持仓市值"], ">")
+                + Common.pad_string("{:.2f}%".format(total_pnl_pct_stock), rw["浮动盈亏"], ">")
+                + Common.pad_string(str(pos.amount), rw["持股数量"], ">")
+                + Common.pad_string(str(holding_days), rw["持股天数"], ">")
+                + Common.pad_string("{:.2f}".format(entry_price), rw["成本价"], ">")
+                + Common.pad_string("{:.2f}".format(current_price), rw["当前价"], ">")
+                + Common.pad_string("{:.2f}%".format(position_pct), rw["持仓比例"], ">")
+                + Common.pad_string("trends_up", rw["策略"], ">")
+            )
+            log.info(row_line)
+
+        log.info(ReportAgent.SEP)
+
+    @staticmethod
+    def generate_profit_loss_report(context):
+        """生成盈亏统计报表（复刻v0.36 Profit Loss Report）"""
+        traded_stocks = getattr(g, "_traded_stocks", set())
+        trade_history = getattr(g, "_trade_history", [])
+
+        if not traded_stocks:
+            return
+
+        # 从交易历史聚合每只股票的统计
+        stock_stats = {}
+        for trade in trade_history:
+            stock = trade["stock"]
+            if stock not in stock_stats:
+                stock_stats[stock] = {
+                    "start_date": trade["date"].replace("-", ""),
+                    "end_date": trade["date"].replace("-", ""),
+                    "profit_cnt": 0, "loss_cnt": 0,
+                    "profit_amt": 0.0, "loss_amt": 0.0,
+                    "fees": 0.0, "net": 0.0,
+                    "buys": [], "sells": [],
+                }
+            stock_stats[stock]["end_date"] = trade["date"].replace("-", "")
+            stock_stats[stock]["fees"] += trade["fees"]
+
+            if trade["action"] == "买":
+                stock_stats[stock]["buys"].append(trade)
+            else:
+                stock_stats[stock]["sells"].append(trade)
+
+        # 计算每只股票的已实现盈亏
+        for stock, stats in stock_stats.items():
+            buys = [dict(t) for t in stats["buys"]]
+            for sell_trade in stats["sells"]:
+                sell_pnl = 0.0
+                remaining = sell_trade["amount"]
+                while remaining > 0 and buys:
+                    buy_trade = buys[0]
+                    matched = min(remaining, buy_trade["amount"])
+                    sell_pnl += (sell_trade["price"] - buy_trade["price"]) * matched
+                    buy_trade["amount"] -= matched
+                    remaining -= matched
+                    if buy_trade["amount"] <= 0:
+                        buys.pop(0)
+
+                sell_pnl -= sell_trade["fees"]
+                if sell_pnl > 0:
+                    stats["profit_cnt"] += 1
+                    stats["profit_amt"] += sell_pnl
+                elif sell_pnl < 0:
+                    stats["loss_cnt"] += 1
+                    stats["loss_amt"] += abs(sell_pnl)
+                stats["net"] += sell_pnl
+
+        # 也包含当前持仓（未实现部分不计入盈亏次数/金额，但更新end_date和价格）
+        current_positions = context.portfolio.positions
+        for stock in list(stock_stats.keys()):
+            if stock in current_positions and current_positions[stock].amount > 0:
+                stock_stats[stock]["end_date"] = context.current_dt.strftime("%Y%m%d")
+
+        log.info("")
+        log.info(ReportAgent.STAR_SEP)
+        log.info("                 Profit Loss Report (Detailed)                  ")
+        log.info(ReportAgent.LINE_SEP)
+
+        hw = ReportAgent.PNL_HW
+        header_line = (
+            Common.pad_string("代码", hw["代码"], ">")
+            + Common.pad_string("开始日期", hw["开始日期"], ">")
+            + Common.pad_string("结束日期", hw["结束日期"], ">")
+            + Common.pad_string("期初价", hw["期初价"], ">")
+            + Common.pad_string("期末价", hw["期末价"], ">")
+            + Common.pad_string("价格变动", hw["价格变动"], ">")
+            + Common.pad_string("涨跌幅", hw["涨跌幅"], ">")
+            + Common.pad_string("盈利次数", hw["盈利次数"], ">")
+            + Common.pad_string("亏损次数", hw["亏损次数"], ">")
+            + Common.pad_string("盈利金额", hw["盈利金额"], ">")
+            + Common.pad_string("亏损金额", hw["亏损金额"], ">")
+            + Common.pad_string("手续费", hw["手续费"], ">")
+            + Common.pad_string("盈亏统计", hw["盈亏统计"], ">")
+        )
+        log.info(header_line)
+        log.info(ReportAgent.LINE_SEP)
+
+        rw = ReportAgent.PNL_RW
+        for stock in sorted(stock_stats.keys()):
+            stats = stock_stats[stock]
+            start_date = stats["start_date"]
+            end_date = stats["end_date"]
+
+            # 获取期初/期末价格
+            start_price = ReportAgent._get_price_at(stock, start_date)
+            end_price = ReportAgent._get_price_at(stock, end_date)
+            price_change = end_price - start_price
+            pct_change = (price_change / start_price) if start_price > 1e-6 else 0.0
+
+            row_line = (
+                Common.pad_string(stock, rw["代码"], ">")
+                + Common.pad_string(start_date, rw["开始日期"], ">")
+                + Common.pad_string(end_date, rw["结束日期"], ">")
+                + Common.pad_string("{:.2f}".format(start_price), rw["期初价"], ">")
+                + Common.pad_string("{:.2f}".format(end_price), rw["期末价"], ">")
+                + Common.pad_string("{:.2f}".format(price_change), rw["价格变动"], ">")
+                + Common.pad_string("{:.2%}".format(pct_change), rw["涨跌幅"], ">")
+                + Common.pad_string(str(stats["profit_cnt"]), rw["盈利次数"], ">")
+                + Common.pad_string(str(stats["loss_cnt"]), rw["亏损次数"], ">")
+                + Common.pad_string("{:.2f}".format(stats["profit_amt"]), rw["盈利金额"], ">")
+                + Common.pad_string("{:.2f}".format(stats["loss_amt"]), rw["亏损金额"], ">")
+                + Common.pad_string("{:.2f}".format(stats["fees"]), rw["手续费"], ">")
+                + Common.pad_string("{:.2f}".format(stats["net"]), rw["盈亏统计"], ">")
+            )
+            log.info(row_line)
+
+        log.info(ReportAgent.STAR_SEP)
+
+    @staticmethod
+    def _get_price_at(stock, date_str):
+        """获取指定日期或之前的收盘价"""
+        try:
+            df = DataCache.get_daily_data(stock, 30)
+            if df.empty:
+                return 0.0
+            target = pd.Timestamp(date_str)
+            if isinstance(df.index, pd.DatetimeIndex):
+                mask = df.index <= target
+                if mask.any():
+                    return float(df.loc[mask, "close"].iloc[-1])
+            if "date" in df.columns:
+                dates = pd.to_datetime(df["date"])
+                mask = dates <= target
+                if mask.any():
+                    return float(df.loc[mask.values, "close"].iloc[-1])
+            return float(df["close"].iloc[0])
+        except Exception:
+            return 0.0
+
+    @staticmethod
+    def log_selection_list(context, scored_stocks):
+        """输出每日选股列表（按得分降序前10名，复刻v0.36格式）"""
+        if not scored_stocks:
+            return
+
+        top10 = scored_stocks[:10]
+        stocks = [s for s, _, _ in top10]
+
+        # 批量获取股票名称
+        name_map = {}
+        try:
+            fn = globals().get("get_stock_name")
+            if callable(fn):
+                for s in stocks:
+                    try:
+                        name_map[s] = fn(s) or s
+                    except Exception:
+                        name_map[s] = s
+            else:
+                name_map = {s: s for s in stocks}
+        except Exception:
+            name_map = {s: s for s in stocks}
+
+        # 批量获取市值数据（优先使用缓存的 valuation 数据）
+        cap_map = {}
+        try:
+            query_date = context.current_dt.strftime("%Y%m%d")
+            val_df = DataCache.get_valuation_data(stocks, query_date)
+            if val_df is not None and not val_df.empty:
+                for stock in stocks:
+                    try:
+                        if stock in val_df.index:
+                            row = val_df.loc[stock]
+                            if isinstance(row, pd.DataFrame):
+                                row = row.iloc[0]
+                            tv = float(row.get("total_value", 0) or 0)
+                            fv = float(row.get("float_value", 0) or 0)
+                            if tv > 0:
+                                cap_map[stock] = (tv / 1e8, fv / 1e8)
+                    except Exception:
+                        continue
+
+            missing = [s for s in stocks if s not in cap_map]
+            if missing:
+                shares_map = SelectionAgent._get_capital_data(missing, query_date)
+                if shares_map is not None and not shares_map.empty:
+                    for stock in missing:
+                        try:
+                            if stock in shares_map.index:
+                                row = shares_map.loc[stock]
+                                if isinstance(row, pd.DataFrame):
+                                    row = row.iloc[0]
+                                ts = float(row.get("total_shares", 0) or 0)
+                                af = float(row.get("a_floats", 0) or 0)
+                                df = DataCache.get_daily_data(stock, 5)
+                                close = df["close"].iloc[-1] if not df.empty else 0
+                                if ts > 0 and close > 0:
+                                    cap_map[stock] = (ts * close / 1e8, af * close / 1e8)
+                        except Exception:
+                            continue
+        except Exception:
+            pass
+
+        # 计算每只股票的仓位百分比
+        total_weight = sum(3.0 if grd == "S" else 1.0 for _, _, grd in top10)
+        pos_pct_map = {}
+        for stock, score, grade in top10:
+            w = 3.0 if grade == "S" else 1.0
+            pos_pct_map[stock] = w / total_weight * 100
+
+        sep = "-" * 87
+        log.info("[趋势跟踪] " + sep)
+        log.info(
+            "[趋势跟踪]    股票代码    股票名称      总市值(亿)"
+            "   流通市值(亿)    当前价       得分      仓位"
+        )
+        log.info("[趋势跟踪] " + sep)
+
+        for stock, score, grade in top10:
+            try:
+                stock_name = name_map.get(stock, stock)
+                df = DataCache.get_daily_data(stock, 5)
+                current_price = float(df["close"].iloc[-1]) if not df.empty else 0.0
+                total_yi, float_yi = cap_map.get(stock, (0.0, 0.0))
+                pos_str = "{:.0f}%".format(pos_pct_map.get(stock, 20))
+
+                total_str = "{:.2f}".format(total_yi) if total_yi > 0 else "N/A"
+                float_str = "{:.2f}".format(float_yi) if float_yi > 0 else "N/A"
+
+                log.info(
+                    "[趋势跟踪]  {:<10} {:<8}  总:{:<7} 流:{:<7}"
+                    "  {:>6.2f}      {:>6.3f}    {}".format(
+                        stock, stock_name, total_str, float_str,
+                        current_price, float(score), pos_str,
+                    )
+                )
+            except Exception as e:
+                log.debug(f"[选股列表] {stock} 格式化异常: {e}")
+
+        log.info("[趋势跟踪] " + sep)
+
+    @staticmethod
+    def evaluate_positions(context):
+        """持仓评分排名"""
+        positions = context.portfolio.positions
+        if not positions or not any(p.amount > 0 for p in positions.values()):
+            return
+
+        log.info("[持仓评估] 开始评估 {} 只持仓...".format(
+            sum(1 for p in positions.values() if p.amount > 0)
+        ))
+
+        position_scores = []
+        for stock, pos in positions.items():
+            if pos.amount <= 0:
+                continue
+            try:
+                df = DataCache.get_daily_data(stock, 60)
+                if df.empty or len(df) < 20:
+                    continue
+
+                profit_result = PositionAgent.calc_profit_ratio_safely(pos)
+                pnl_pct = profit_result[0] if profit_result[0] is not None else 0
+
+                holding_days = 0
+                if hasattr(g, "_holding_start_date") and stock in g._holding_start_date:
+                    hd = g._holding_start_date[stock]
+                    holding_days = (context.current_dt.date() - hd).days if hasattr(hd, "days") else (context.current_dt.date() - hd).days
+
+                close = df["close"]
+                ma20 = close.rolling(20).mean().iloc[-1]
+                ma_trend_score = 1.0 if close.iloc[-1] > ma20 else 0.0
+
+                vol = df["volume"]
+                vol_5d = vol.rolling(5).mean().iloc[-1]
+                vol_20d = vol.rolling(20).mean().iloc[-1]
+                vol_score = 1.0 if vol_5d > vol_20d * 0.8 else 0.5
+
+                holding_score = 1.0 if holding_days < 10 else 0.5 if holding_days < 20 else 0.0
+                pnl_score = 1.0 if pnl_pct > 0.1 else 0.5 if pnl_pct > 0 else 0.0
+
+                total_score = (
+                    pnl_score * 0.30 + holding_score * 0.15
+                    + ma_trend_score * 0.20 + vol_score * 0.15
+                    + 0.20  # 基础分
+                )
+
+                position_scores.append({
+                    "stock": stock, "score": total_score,
+                    "pnl_pct": pnl_pct, "days_held": holding_days,
+                })
+            except Exception:
+                continue
+
+        if not position_scores:
+            return
+
+        position_scores.sort(key=lambda x: x["score"], reverse=True)
+        log.info("[持仓评分] 排名:")
+        for i, ps in enumerate(position_scores):
+            log.info("  {}. {} 评分{:.2f} 盈亏{:.1%} 持仓{}天".format(
+                i + 1, ps["stock"], ps["score"], ps["pnl_pct"], ps["days_held"]
+            ))
+
+
+
+# ==========================================
+# 8. 全局生命周期函数 (PTrade 接口)
 # ==========================================
 
 
@@ -1811,6 +2442,10 @@ def initialize(context):
 
     g._holding_start_date = {}  # 持仓起始日期
     g._bar_count = 0  # K线计数器
+
+    # 交易跟踪（盘后报表用）
+    g._trade_history = []  # 交易历史
+    g._traded_stocks = set()  # 所有交易过的股票
 
     # 尝试加载缓存
     DataCache.load_pkl_cache()
@@ -1910,9 +2545,12 @@ def handle_data(context, data):
             )
 
             if buy_list:
+                # 输出选股列表
+                ReportAgent.log_selection_list(context, buy_list)
                 log.info(
-                    f"发现符合突破形态的个股 {len(buy_list)} 只: "
-                    f"{[(s[0], s[2]) for s in buy_list]}"
+                    "发现符合突破形态的个股 {} 只: {}".format(
+                        len(buy_list), [(s[0], s[2]) for s in buy_list]
+                    )
                 )
                 all_buy_candidates.extend(buy_list)
 
@@ -1940,42 +2578,36 @@ def handle_data(context, data):
 
 def after_trading_end(context, data):
     """
-    每日收盘后结算（🆕 optimize_15: 新增市场模式日志）
+    每日收盘后结算
     """
-    log.info("执行每日收盘后结算处理 (after_trading_end)")
+    log.info(f"[盘后流程] 开始执行 {context.current_dt.date()}")
 
-    # 🆕 输出当前市场模式日志
+    # 市场模式日志
     mode = MarketDetector.detect_market_mode(context)
     params = ConfigManager.DUAL_MODE_PARAMS.get(mode, {})
     log.info(
-        f"[市场模式] 当前模式={mode}, "
-        f"止盈L1={params.get('TAKE_PROFIT_L1', 'N/A')*100:.0f}%, "
-        f"止盈L2={params.get('TAKE_PROFIT_L2', 'N/A')*100:.0f}%, "
-        f"日线/15min={params.get('STOP_DATA_FREQUENCY', 'N/A')}"
+        "[市场模式] 当前模式={}, 止盈L1={:.0f}%, 止盈L2={:.0f}%, 日线/15min={}".format(
+            mode,
+            params.get("TAKE_PROFIT_L1", 9.99) * 100,
+            params.get("TAKE_PROFIT_L2", 9.99) * 100,
+            params.get("STOP_DATA_FREQUENCY", "N/A"),
+        )
     )
 
-    # 持仓评估
-    current_positions = context.portfolio.positions
-    pos_details = []
-    for stock, pos in current_positions.items():
-        if pos.amount > 0:
-            cost = pos.cost_basis
-            price = (
-                pos.market_value / pos.amount
-                if pos.amount > 0 and hasattr(pos, "market_value")
-                else 0
-            )
-            profit_ratio = (price - cost) / cost if cost > 0 and price > 0 else 0
-            pos_details.append(f"{stock}: 收益 {profit_ratio*100:.2f}%")
-
-    if pos_details:
-        log.info("当前持仓评估: " + ", ".join(pos_details))
-    else:
-        log.info("当前无持仓。")
+    # 生成盘后报表
+    try:
+        ReportAgent.generate_daily_reports(context)
+        ReportAgent.generate_profit_loss_report(context)
+    except Exception as e:
+        log.warning("[盘后流程] 生成报表失败: {}".format(e))
 
     # 每日盈亏 CSV 持久化
     try:
-        report_line = f"{context.current_dt.date()},{context.portfolio.portfolio_value},{context.portfolio.positions_value}\n"
+        report_line = "{},{},{}\n".format(
+            context.current_dt.date(),
+            context.portfolio.portfolio_value,
+            context.portfolio.positions_value,
+        )
         content = Common.safe_read_file("daily_pnl_report.csv")
         if not content:
             content = "Date,TotalValue,PositionValue\n"
@@ -1983,12 +2615,13 @@ def after_trading_end(context, data):
             content = content.decode("utf-8")
         content += report_line
         Common.safe_write_file("daily_pnl_report.csv", content)
-        log.debug("成功更新盈亏报表 CSV。")
     except Exception as e:
-        log.warning(f"更新盈亏报表 CSV 失败: {e}")
+        log.warning("更新盈亏报表 CSV 失败: {}".format(e))
 
     # 保存缓存
     DataCache.save_pkl_cache()
+    log.info("[盘后流程] 执行完成")
+    print("\n\n")
 
 
 def on_order_response(context, trade_list):
@@ -2085,7 +2718,18 @@ def on_trade_response(context, trade_list):
             content += record_line
             Common.safe_write_file("交易详情_trends_up.csv", content.encode("gbk"))
             log.info(
-                f"[成交响应] 已记录交易详情: {stock}, {action_str}, 价格: {price}, 数量: {amount}"
+                "[PnL_Update] {} {}: qty={} price={:.4f} fees={:.4f}".format(
+                    stock, action_str, abs(amount), price, commission
+                )
             )
         except Exception as e:
-            log.warning(f"记录交易详情 CSV 失败: {e}")
+            log.warning("记录交易详情 CSV 失败: {}".format(e))
+
+        # 盘后报表交易跟踪
+        if hasattr(g, "_trade_history"):
+            g._trade_history.append({
+                "stock": stock, "action": action_str,
+                "price": price, "amount": abs(amount),
+                "date": date_str, "fees": commission,
+            })
+            g._traded_stocks.add(stock)
