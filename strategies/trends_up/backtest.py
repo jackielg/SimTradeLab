@@ -523,21 +523,25 @@ class SelectionAgent:
 
     @staticmethod
     def build_watchlist(context):
-        """
-        构建观察池：完整输出 Step 1~7 带 emoji 的日志，执行基础过滤。
-        结果保存在 g.long_term_candidates
-        """
-        log.info("[盘前预筛选] 开始长期趋势筛选...")
-        t_start = datetime.datetime.now()
+        """构建观察池：执行 Step 1~6 选股漏斗，结果保存在 g.long_term_candidates"""
+        log.info("")
+        log.info("═" * 80)
+        log.info("📊 选股漏斗 %s" % context.current_dt.strftime("%Y-%m-%d %H:%M"))
+        log.info("═" * 80)
+
+        t_total = datetime.datetime.now()
+
+        # Step1: 股票池初始化
+        t_step = datetime.datetime.now()
         candidates = get_Ashares()
         if not candidates:
-            log.error("初始股票池为空，跳过筛选")
+            log.error("❌ 初始股票池为空，跳过筛选")
             g.long_term_candidates = []
             return
-        log.info(f"[盘前筛选] 1️⃣ Step1 - 股票池初始化: 待处理股票 {len(candidates)} 只, 耗时 {(datetime.datetime.now() - t_start).total_seconds():.1f}秒")
+        log.info("1️⃣  股票池初始化      → %d 只  (%.1fs)" % (len(candidates), (datetime.datetime.now() - t_step).total_seconds()))
 
         # Step2: 异常股过滤（停牌/退市/北交所/科创板，保留ST）
-        t_step2 = datetime.datetime.now()
+        t_step = datetime.datetime.now()
         step2_candidates = [
             stock
             for stock in candidates
@@ -547,45 +551,32 @@ class SelectionAgent:
                 or stock.startswith("43")
             )
         ]
+        log.info("2️⃣  异常股过滤        → %d 只  (%.1fs)  [过滤: 科创/北交/停牌]" % (len(step2_candidates), (datetime.datetime.now() - t_step).total_seconds()))
 
-        log.info(
-            f"[盘前筛选] 2️⃣ Step2 - 异常股过滤（科创/北交等）: 待处理股票 {len(step2_candidates)} 只, 耗时 {(datetime.datetime.now() - t_step2).total_seconds():.1f}秒"
-        )
-
-        # 数据预加载优化
-        preload_start = datetime.datetime.now()
-        log.info(
-            f"[数据预加载] 开始批量加载 {len(step2_candidates)} 只股票的65日数据..."
-        )
+        # 数据预加载
+        t_step = datetime.datetime.now()
         DataCache.preload_daily_data(step2_candidates, 65)
-        preload_elapsed = (datetime.datetime.now() - preload_start).total_seconds()
-        log.info(f"[数据预加载] 完成，耗时 {preload_elapsed:.1f}秒")
+        log.info("   📦 数据预加载      → %d 只  (%.1fs)  [65日数据]" % (len(step2_candidates), (datetime.datetime.now() - t_step).total_seconds()))
 
-        # Step3: 财务过滤（市值约束）- 分位数动态过滤版 V4
-        t_step3 = datetime.datetime.now()
+        # Step3: 财务过滤（市值约束）
+        t_step = datetime.datetime.now()
         step3_candidates, step3_fallback_count, step3_stats = (
             SelectionAgent._filter_by_market_cap(step2_candidates)
         )
+        log.info("3️⃣  市值过滤          → %d 只  (%.1fs)" % (len(step3_candidates), (datetime.datetime.now() - t_step).total_seconds()))
 
-        log.info(
-            f"[盘前筛选] 3️⃣ Step3 - 财务过滤（市值约束）: 待处理股票 {len(step3_candidates)} 只, 耗时 {(datetime.datetime.now() - t_step3).total_seconds():.1f}秒"
-        )
-
-        # Step4+5: 股价+趋势合并过滤（单次循环，减少一轮完整遍历）
-        t_step4 = datetime.datetime.now()
+        # Step4+5: 股价+趋势合并过滤
+        t_step = datetime.datetime.now()
         step5_candidates = SelectionAgent._filter_by_price_and_trend(step3_candidates)
+        log.info("4️⃣  股价+趋势过滤     → %d 只  (%.1fs)  [MAX_PRICE<80, MA20>MA60]" % (len(step5_candidates), (datetime.datetime.now() - t_step).total_seconds()))
 
-        log.info(
-            f"[盘前筛选] 4️⃣5️⃣ Step4+5 - 股价+趋势合并过滤: 待处理股票 {len(step5_candidates)} 只, 耗时 {(datetime.datetime.now() - t_step4).total_seconds():.1f}秒"
-        )
-        t_step6 = datetime.datetime.now()
-        log.info(
-            f"[盘前筛选] 6️⃣ Step6 - 月线趋势确认: 待处理股票 {len(step5_candidates)} 只, 耗时 {(datetime.datetime.now() - t_step6).total_seconds():.1f}秒"
-        )
-        t_step7 = datetime.datetime.now()
-        log.info(
-            f"[盘前筛选] 7️⃣ Step7 - 预选池最终确认: 最终股票 {len(step5_candidates)} 只, 耗时 {(datetime.datetime.now() - t_step7).total_seconds():.1f}秒"
-        )
+        # Step6: 预选池最终确认
+        log.info("5️⃣  预选池确认        → %d 只" % len(step5_candidates))
+
+        elapsed_total = (datetime.datetime.now() - t_total).total_seconds()
+        log.info("─" * 80)
+        log.info("⏱️  漏斗完成: %d → %d 只, 总耗时 %.1fs" % (len(candidates), len(step5_candidates), elapsed_total))
+        log.info("═" * 80)
 
         g.long_term_candidates = step5_candidates
 
@@ -649,12 +640,6 @@ class SelectionAgent:
             step3_candidates, step3_stats = (
                 SelectionAgent._filter_cap_vectorized(val_df, step3_stats)
             )
-            log.info(
-                f"[盘前筛选] Step3 诊断（向量化）: "
-                f"检查{step3_stats['total_checked']}只, "
-                f"过滤{step3_stats['filtered_percentile']+step3_stats['filtered_absolute']}只, "
-                f"最终 {len(step3_candidates)} 只"
-            )
             return step3_candidates, 0, step3_stats
 
         # === SimTradeLab 回退路径：向量化获取股本+市值数据 ===
@@ -666,10 +651,6 @@ class SelectionAgent:
             cache_key = f"{stock}_65_False_{today_str}"
             if cache_key in DataCache._cache:
                 preloaded_cache[stock] = DataCache._cache[cache_key]
-
-        log.info(
-            f"[盘前筛选] Step3 向量化路径: 命中预加载缓存 {len(preloaded_cache)}/{len(step2_candidates)} 只"
-        )
 
         # 批量提取收盘价和成交额（从预加载缓存，零API调用）
         price_map = {}
@@ -683,7 +664,6 @@ class SelectionAgent:
 
         stock_cap_data = []
         batch_size = 100
-        log.info(f"[盘前筛选] Step3 开始批量获取股本数据，批量大小: {batch_size}")
         total_batches = (len(step2_candidates) + batch_size - 1) // batch_size
 
         for batch_idx in range(total_batches):
@@ -763,12 +743,6 @@ class SelectionAgent:
             final_min_abs = min(cap_p20, abs_min)
             final_max = min(cap_p80, abs_max * 1.5)
 
-            log.info(
-                f"[盘前筛选] Step3 市值分位数: P20={cap_p20/1e8:.1f}亿, "
-                f"P80={cap_p80/1e8:.1f}亿, "
-                f"有效范围[{final_min/1e8:.1f},{final_max/1e8:.1f}]亿"
-            )
-
             moneys = [d[3] for d in stock_cap_data if d[3] > 0]
             money_threshold = 0
             if moneys:
@@ -816,20 +790,6 @@ class SelectionAgent:
                 except Exception:
                     step3_candidates.append(stock)
 
-        log.info(
-            f"[盘前筛选] Step3 诊断: 检查{step3_stats['total_checked']}只, "
-            f"分位数过滤{step3_stats['filtered_percentile']}只, "
-            f"绝对值过滤{step3_stats['filtered_absolute']}只, "
-            f"成交额过滤{step3_stats['filtered_money']}只, "
-            f"换手率过滤{step3_stats['filtered_turnover']}只, "
-            f"降级使用{step3_stats['fallback_used']}只"
-        )
-
-        if step3_fallback_count > 0:
-            log.info(
-                f"[盘前筛选] Step3 降级提示: {step3_fallback_count} 只股票使用日线估算市值"
-            )
-
         return step3_candidates, step3_fallback_count, step3_stats
 
     @staticmethod
@@ -861,12 +821,6 @@ class SelectionAgent:
         final_min_abs = min(cap_p20, abs_min)
         final_max = min(cap_p80, abs_max * 1.5)
         max_float = ConfigManager.FILTER_CAPITAL["MAX_FLOAT_CAPITAL"]
-
-        log.info(
-            f"[盘前筛选] Step3 市值分位数: P20={cap_p20/1e8:.1f}亿, "
-            f"P80={cap_p80/1e8:.1f}亿, "
-            f"有效范围[{final_min/1e8:.1f},{final_max/1e8:.1f}]亿"
-        )
 
         mask = (
             (total_values >= final_min)
@@ -1053,11 +1007,12 @@ class SelectionAgent:
         min_score_b_dynamic = params.get("MIN_SCORE_B", 0.45)  # 动态B级最低分
         max_positions_daily = params.get("MAX_POSITIONS_DAILY", 6)  # 每日最大买入数
 
-        log.info(
-            f"[选股参数] 市场模式={mode}, ALLOW_2_OF_4={allow_2_of_4}, "
-            f"ALLOW_3_OF_4={allow_3_of_4}, MIN_SCORE_B={min_score_b_dynamic:.2f}, "
-            f"MAX_DAILY={max_positions_daily}"
-        )
+        log.info("")
+        log.info("─" * 80)
+        log.info("🎯 选股参数")
+        log.info("─" * 80)
+        log.info("  市场模式: %s | MIN_SCORE_B: %.2f | MAX_DAILY: %d" % (mode, min_score_b_dynamic, max_positions_daily))
+        log.info("  ALLOW_2_OF_4: %s | ALLOW_3_OF_4: %s" % (allow_2_of_4, allow_3_of_4))
 
         for stock in stock_list:
             df = DataCache.get_daily_data(stock, ConfigManager.MA_PERIODS["LONG"] + 10)
@@ -2221,13 +2176,12 @@ class ReportAgent:
             w = 3.0 if grade == "S" else 1.0
             pos_pct_map[stock] = w / total_weight * 100
 
-        sep = "-" * 87
-        log.info("[趋势跟踪] " + sep)
-        log.info(
-            "[趋势跟踪]    股票代码    股票名称      总市值(亿)"
-            "   流通市值(亿)    当前价       得分      仓位"
-        )
-        log.info("[趋势跟踪] " + sep)
+        log.info("")
+        log.info("─" * 80)
+        log.info("📈 选股结果 (%d 只)" % len(top10))
+        log.info("─" * 80)
+        log.info("  股票代码    股票名称    总市值(亿)  流通市值(亿)  当前价   得分   级别  仓位")
+        log.info("  " + "─" * 76)
 
         for stock, score, grade in top10:
             try:
@@ -2241,16 +2195,15 @@ class ReportAgent:
                 float_str = "{:.2f}".format(float_yi) if float_yi > 0 else "N/A"
 
                 log.info(
-                    "[趋势跟踪]  {:<10} {:<8}  总:{:<7} 流:{:<7}"
-                    "  {:>6.2f}      {:>6.3f}    {}".format(
+                    "  {:<10} {:<8}  {:>8}  {:>8}  {:>6.2f}  {:>6.3f}  {:>2}  {:>4}".format(
                         stock, stock_name, total_str, float_str,
-                        current_price, float(score), pos_str,
+                        current_price, float(score), grade, pos_str,
                     )
                 )
             except Exception as e:
                 log.debug(f"[选股列表] {stock} 格式化异常: {e}")
 
-        log.info("[趋势跟踪] " + sep)
+        log.info("─" * 80)
 
 
 
