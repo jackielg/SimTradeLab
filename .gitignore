@@ -69,7 +69,6 @@ backtest*.json
 *.png
 !docs/sponsor/*.png
 *.gz
-CLAUDE.md
 GEMINI.md
 .pre-commit-config.yaml
 data*/
