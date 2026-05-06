@@ -419,7 +419,13 @@ class DataCache:
 
     @staticmethod
     def get_5m_data(stock, count):
-        """获取 5分钟级别高频数据"""
+        """获取 5分钟级别高频数据（带日内缓存）"""
+        today_str = g.current_date_str if hasattr(g, "current_date_str") else ""
+        cache_key = f"{stock}_{count}_5m_{today_str}"
+
+        if cache_key in DataCache._cache:
+            return DataCache._cache[cache_key]
+
         data = get_history(
             count=count,
             frequency="5m",
@@ -434,6 +440,7 @@ class DataCache:
             if isinstance(stock_data, np.ndarray):
                 stock_data = pd.DataFrame(stock_data)
             if not stock_data.empty:
+                DataCache._cache[cache_key] = stock_data
                 return stock_data
         return pd.DataFrame()
 
@@ -612,20 +619,12 @@ class SelectionAgent:
             f"[盘前筛选] 3️⃣ Step3 - 财务过滤（市值约束）: 待处理股票 {len(step3_candidates)} 只, 耗时 {(datetime.datetime.now() - t_step3).total_seconds():.1f}秒"
         )
 
-        # Step4: 股价预过滤
+        # Step4+5: 股价+趋势合并过滤（单次循环，减少一轮完整遍历）
         t_step4 = datetime.datetime.now()
-        step4_candidates = SelectionAgent._filter_by_price(step3_candidates)
+        step5_candidates = SelectionAgent._filter_by_price_and_trend(step3_candidates)
 
         log.info(
-            f"[盘前筛选] 4️⃣ Step4 - 股价预过滤: 待处理股票 {len(step4_candidates)} 只, 耗时 {(datetime.datetime.now() - t_step4).total_seconds():.1f}秒"
-        )
-
-        # Step5: 趋势初筛增强
-        t_step5 = datetime.datetime.now()
-        step5_candidates = SelectionAgent._filter_by_trend(step4_candidates)
-
-        log.info(
-            f"[盘前筛选] 5️⃣ Step5 - 技术面初筛（多条件趋势确认）: 待处理股票 {len(step5_candidates)} 只, 耗时 {(datetime.datetime.now() - t_step5).total_seconds():.1f}秒"
+            f"[盘前筛选] 4️⃣5️⃣ Step4+5 - 股价+趋势合并过滤: 待处理股票 {len(step5_candidates)} 只, 耗时 {(datetime.datetime.now() - t_step4).total_seconds():.1f}秒"
         )
         t_step6 = datetime.datetime.now()
         log.info(
@@ -706,11 +705,32 @@ class SelectionAgent:
             )
             return step3_candidates, 0, step3_stats
 
-        # === SimTradeLab 回退路径：逐批获取股本数据 ===
+        # === SimTradeLab 回退路径：向量化获取股本+市值数据 ===
+        # 利用已预加载的65日缓存（build_watchlist已调用preload_daily_data）
+        # 批量提取收盘价和成交额，避免逐只调用get_daily_data
+        today_str = g.current_date_str if hasattr(g, "current_date_str") else ""
+        preloaded_cache = {}
+        for stock in step2_candidates:
+            cache_key = f"{stock}_65_False_{today_str}"
+            if cache_key in DataCache._cache:
+                preloaded_cache[stock] = DataCache._cache[cache_key]
+
+        log.info(
+            f"[盘前筛选] Step3 向量化路径: 命中预加载缓存 {len(preloaded_cache)}/{len(step2_candidates)} 只"
+        )
+
+        # 批量提取收盘价和成交额（从预加载缓存，零API调用）
+        price_map = {}
+        money_map = {}
+        for stock, df_stock in preloaded_cache.items():
+            if not df_stock.empty and len(df_stock) >= 1:
+                close_val = df_stock["close"].iloc[-1]
+                if close_val > 0:
+                    price_map[stock] = close_val
+                    money_map[stock] = df_stock["money"].iloc[-1]
+
         stock_cap_data = []
         batch_size = 100
-        daily_data_cache = {}
-
         log.info(f"[盘前筛选] Step3 开始批量获取股本数据，批量大小: {batch_size}")
         total_batches = (len(step2_candidates) + batch_size - 1) // batch_size
 
@@ -734,45 +754,33 @@ class SelectionAgent:
                     continue
 
                 for stock in batch_stocks:
-                    if stock not in daily_data_cache:
-                        daily_data_cache[stock] = DataCache.get_daily_data(stock, 30)
-
-                for stock in batch_stocks:
-                    df_stock = daily_data_cache[stock]
                     try:
-                        use_fallback = False
                         if stock not in fundamentals.index:
-                            use_fallback = True
                             step3_stats["fallback_used"] += 1
-                        else:
-                            row = fundamentals.loc[stock]
-                            raw_total_shares = float(row["total_shares"])
-                            raw_float_shares = float(row["a_floats"])
-
-                            if df_stock.empty or len(df_stock) < 1:
-                                use_fallback = True
-                                step3_stats["fallback_used"] += 1
-                            else:
-                                close = df_stock["close"].iloc[-1]
-                                if close <= 0:
-                                    use_fallback = True
-                                    step3_stats["fallback_used"] += 1
-                                else:
-                                    total_cap = raw_total_shares * close
-                                    float_cap = raw_float_shares * close
-                                    money_val = df_stock["money"].iloc[-1]
-                                    stock_cap_data.append(
-                                        (stock, total_cap, float_cap, money_val)
-                                    )
-
-                        if use_fallback:
-                            result = SelectionAgent._fallback_cap_estimation(
-                                stock, df_stock
-                            )
+                            result = SelectionAgent._fallback_cap_estimation(stock)
                             if result:
                                 stock_cap_data.append(result)
                                 step3_fallback_count += 1
+                            continue
 
+                        close = price_map.get(stock, 0)
+                        if close <= 0:
+                            step3_stats["fallback_used"] += 1
+                            result = SelectionAgent._fallback_cap_estimation(stock)
+                            if result:
+                                stock_cap_data.append(result)
+                                step3_fallback_count += 1
+                            continue
+
+                        row = fundamentals.loc[stock]
+                        raw_total_shares = float(row["total_shares"])
+                        raw_float_shares = float(row["a_floats"])
+                        total_cap = raw_total_shares * close
+                        float_cap = raw_float_shares * close
+                        money_val = money_map.get(stock, 0)
+                        stock_cap_data.append(
+                            (stock, total_cap, float_cap, money_val)
+                        )
                     except Exception as e:
                         log.debug(f"[Step3] {stock} 数据处理异常: {e}")
                         continue
@@ -843,8 +851,9 @@ class SelectionAgent:
                         step3_stats["filtered_money"] += 1
                         continue
 
-                    df_check = DataCache.get_daily_data(stock, 10)
-                    if not df_check.empty and len(df_check) >= 5:
+                    # 使用已预加载的缓存数据检查换手率（避免再次API调用）
+                    df_check = preloaded_cache.get(stock)
+                    if df_check is not None and not df_check.empty and len(df_check) >= 5:
                         vol_today = df_check["volume"].iloc[-1]
                         vol_ma5 = df_check["volume"].rolling(5).mean().iloc[-1]
                         if vol_ma5 > 0 and (vol_today / vol_ma5) < 0.5:
@@ -980,6 +989,27 @@ class SelectionAgent:
         return step5_candidates
 
     @staticmethod
+    def _filter_by_price_and_trend(candidates):
+        """Step4+5 合并: 股价+趋势单次循环过滤（减少一轮完整遍历）"""
+        result = []
+        max_price = ConfigManager.FILTER_CAPITAL["MAX_PRICE"]
+        for stock in candidates:
+            try:
+                df = DataCache.get_daily_data(stock, 65)
+                if df.empty or len(df) < 5:
+                    result.append(stock)
+                    continue
+                close = df["close"].iloc[-1]
+                if close >= max_price:
+                    continue
+                if len(df) >= 20 and not SelectionAgent.enhanced_trend_filter(df):
+                    continue
+                result.append(stock)
+            except Exception:
+                result.append(stock)
+        return result
+
+    @staticmethod
     def enhanced_trend_filter(df):
         """
         增强版趋势过滤：多条件趋势确认（满足2/3即通过）
@@ -1019,7 +1049,7 @@ class SelectionAgent:
         return True
 
     @staticmethod
-    def score_breakout_stock(stock, df, volume_score_override=None):
+    def score_breakout_stock(stock, df, volume_score_override=None, macd_score_override=None, ma_values_override=None):
         """
         计算股票突破信号的综合得分（四维打分系统）
 
@@ -1028,6 +1058,8 @@ class SelectionAgent:
         2. 突破幅度: 25%
         3. 量能比: 25%
         4. MACD强度: 20%
+
+        优化: macd_score_override/ma_values_override 避免 select 中重复计算
         """
         if df.empty or len(df) < ConfigManager.MA_PERIODS["LONG"]:
             return 0.0
@@ -1035,12 +1067,15 @@ class SelectionAgent:
         close = df["close"].iloc[-1]
         vol = df["volume"].iloc[-1]
 
-        # 1. 均线粘合度得分
-        ma_short = (
-            df["close"].rolling(ConfigManager.MA_PERIODS["SHORT"]).mean().iloc[-1]
-        )
-        ma_mid = df["close"].rolling(ConfigManager.MA_PERIODS["MID"]).mean().iloc[-1]
-        ma_long = df["close"].rolling(ConfigManager.MA_PERIODS["LONG"]).mean().iloc[-1]
+        # 1. 均线粘合度得分（优先使用预计算值）
+        if ma_values_override is not None:
+            ma_short, ma_mid, ma_long = ma_values_override
+        else:
+            ma_short = (
+                df["close"].rolling(ConfigManager.MA_PERIODS["SHORT"]).mean().iloc[-1]
+            )
+            ma_mid = df["close"].rolling(ConfigManager.MA_PERIODS["MID"]).mean().iloc[-1]
+            ma_long = df["close"].rolling(ConfigManager.MA_PERIODS["LONG"]).mean().iloc[-1]
 
         mas = [ma_short, ma_mid, ma_long]
         max_ma = max(mas)
@@ -1071,14 +1106,17 @@ class SelectionAgent:
             else:
                 score_volume = 0.0
 
-        # 4. MACD强度得分
-        macd_tuple = get_MACD(df["close"].values, 12, 26, 9)
-        if macd_tuple and len(macd_tuple) >= 3:
-            macd_arr, signal_arr, _ = macd_tuple
-            macd = macd_arr[-1]
-            score_macd = min(abs(macd) * 2, 1.0)
+        # 4. MACD强度得分（优先使用预计算值）
+        if macd_score_override is not None:
+            score_macd = macd_score_override
         else:
-            score_macd = 0.0
+            macd_tuple = get_MACD(df["close"].values, 12, 26, 9)
+            if macd_tuple and len(macd_tuple) >= 3:
+                macd_arr, signal_arr, _ = macd_tuple
+                macd = macd_arr[-1]
+                score_macd = min(abs(macd) * 2, 1.0)
+            else:
+                score_macd = 0.0
 
         # 加权综合得分
         weights = ConfigManager.SCORING_WEIGHTS
@@ -1129,13 +1167,10 @@ class SelectionAgent:
             if df.empty or len(df) < ConfigManager.MA_PERIODS["LONG"]:
                 continue
 
-            if not SelectionAgent.filter_by_fundamentals_and_price(stock, df):
-                continue
-
             close = df["close"].iloc[-1]
             vol = df["volume"].iloc[-1]
 
-            # 1. 均线粘合
+            # 1. 均线粘合（一次计算，后续传递给 score_breakout_stock）
             ma_short = (
                 df["close"].rolling(ConfigManager.MA_PERIODS["SHORT"]).mean().iloc[-1]
             )
@@ -1145,10 +1180,10 @@ class SelectionAgent:
             ma_long = (
                 df["close"].rolling(ConfigManager.MA_PERIODS["LONG"]).mean().iloc[-1]
             )
+            ma_values = (ma_short, ma_mid, ma_long)
 
-            mas = [ma_short, ma_mid, ma_long]
-            max_ma = max(mas)
-            min_ma = min(mas)
+            max_ma = max(ma_values)
+            min_ma = min(ma_values)
             condition_ma_converge = (
                 max_ma - min_ma
             ) / min_ma <= ConfigManager.BREAKOUT["MA_CONVERGENCE"]
@@ -1177,8 +1212,9 @@ class SelectionAgent:
                 volume_score = 0.0
                 condition_volume = False
 
-            # 4. MACD 金叉（🆕 支持可选模式 + 正轴模式）
+            # 4. MACD 金叉（一次计算，后续传递 macd_score 给 score_breakout_stock）
             macd_tuple = get_MACD(df["close"].values, 12, 26, 9)
+            macd_score = None
             if not macd_tuple or len(macd_tuple) < 3:
                 condition_macd = False
             else:
@@ -1187,6 +1223,7 @@ class SelectionAgent:
                 signal = signal_arr[-1]
                 macd_prev = macd_arr[-2]
                 signal_prev = signal_arr[-2]
+                macd_score = min(abs(macd) * 2, 1.0)
 
                 macd_limit = ConfigManager.BREAKOUT["MACD_ZERO_AXIS_LIMIT"]
 
@@ -1218,7 +1255,7 @@ class SelectionAgent:
             if met_count == 4:
                 # 四重条件全部满足 → S/A/B级
                 base_score = SelectionAgent.score_breakout_stock(
-                    stock, df, volume_score
+                    stock, df, volume_score, macd_score, ma_values
                 )
                 if base_score > 0.75:
                     grade = "S"
@@ -1233,7 +1270,7 @@ class SelectionAgent:
             elif met_count == 3 and allow_3_of_4:
                 # 3/4条件通过 → B级
                 base_score = SelectionAgent.score_breakout_stock(
-                    stock, df, volume_score
+                    stock, df, volume_score, macd_score, ma_values
                 )
                 if base_score > min_score_b_dynamic:  # 🆕 使用动态阈值
                     grade = "B"
@@ -1242,7 +1279,7 @@ class SelectionAgent:
             elif met_count == 2 and allow_2_of_4:
                 # 🆕 2/4条件通过 → B级（放宽选股逻辑）
                 base_score = SelectionAgent.score_breakout_stock(
-                    stock, df, volume_score
+                    stock, df, volume_score, macd_score, ma_values
                 )
                 if base_score > (min_score_b_dynamic - 0.05):  # 🆕 使用动态阈值（略低）
                     grade = "B"
@@ -1816,19 +1853,15 @@ class PositionAgent:
                     continue
 
             # ===== 保护机制2: MA跟踪止损（核心！双模自适应）=====
-            ma = df["close"].rolling(ma_period).mean().iloc[-1]
+            ma_series = df["close"].rolling(ma_period).mean()
+            ma = ma_series.iloc[-1]
 
             if close < ma:
                 # 震荡市需要确认（避免假突破）
                 if mode == "sideways" and params["CONFIRM_STOP_BARS"] > 1:
-                    # 检查最近N根K线是否都在MA下方
+                    # 检查最近N根K线是否都在MA下方（复用已计算的 ma_series）
                     recent_closes = df["close"].iloc[-params["CONFIRM_STOP_BARS"] :]
-                    ma_recent = (
-                        df["close"]
-                        .rolling(ma_period)
-                        .mean()
-                        .iloc[-params["CONFIRM_STOP_BARS"] :]
-                    )
+                    ma_recent = ma_series.iloc[-params["CONFIRM_STOP_BARS"] :]
 
                     # 所有最近N根K线的收盘价都低于对应的MA值才确认止损
                     if all(
