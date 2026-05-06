@@ -29,6 +29,7 @@ Python >=3.10, Poetry, Ruff (lint), Pydantic (config), src/ layout
 - LifecycleController 7阶段状态机限制每阶段可用 API（如 order() 仅在 handle_data 中）
 - StrategyDataAnalyzer 用 AST 分析策略数据依赖，按需加载 Parquet
 - 策略生命周期 hooks: initialize, handle_data, before_trading_start, after_trading_end
+- 策略日志数字格式统一规则：金额/价格/现价/保本线/峰值用 `.2f`(两位小数)，数量/仓位用 `.0f`(整数)，得分用 `.3f`(三位小数)，收益率/回撤/涨幅用 `.2f%`(两位小数百分比)
 
 ## Pitfalls（已踩坑记录）
 - macOS 上 `python` 命令不存在，必须用 `python3`；Windows 上 `python` 可用
