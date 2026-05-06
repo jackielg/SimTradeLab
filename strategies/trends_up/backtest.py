@@ -1,8 +1,7 @@
 # -*- coding: utf-8 -*-
 """
 趋势跟踪策略 (trends_up)
-优化版本: S2终版 (2026-04-13)
-核心: 统一60m止损, 取消固定止盈+移动止盈(回撤15%), 只买S级, 按模式差异化仓位
+核心: MA20跟踪止损, 三档止盈, 只买S级, 按模式差异化仓位
 """
 
 import pickle
@@ -13,14 +12,10 @@ import numpy as np
 
 
 # ==========================================
-# 1. ConfigManager: 精简配置中心（optimize_14 全面重构）
+# 1. ConfigManager: 配置中心
 # ==========================================
 class ConfigManager:
-    """
-    统一管理策略的所有超参数、过滤阈值和功能开关
-
-    optimize_14重构: 从288行精简到~120行，删除所有死配置项
-    """
+    """统一管理策略的所有超参数、过滤阈值和功能开关"""
 
     # 基础配置
     MAX_POSITIONS = 5  # 持仓上限
@@ -66,8 +61,8 @@ class ConfigManager:
         "MACD_ZERO_AXIS_LIMIT": 2.0,
         "MACD_OPTIONAL_MODE": True,
         "ALLOW_3_OF_4": True,
-        "ALLOW_2_OF_4": True,  # 🆕 新增：允许2/4条件通过即为B级
-        "MIN_CONDITIONS_FOR_B": 2,  # 🆕 新增：B级最低条件数
+        "ALLOW_2_OF_4": True,
+        "MIN_CONDITIONS_FOR_B": 2,
     }
 
     # 数据缓存配置
@@ -93,7 +88,7 @@ class ConfigManager:
         "TURNOVER_HIGH": 0.08,
     }
 
-    # 🆕 MA20跟踪止损参数（替代复杂的ATR吊灯系统）
+    # MA20跟踪止损参数
     SIMPLE_STOP = {
         "MA_PERIOD": 20,  # MA20均线周期
         "MAX_DRAWDOWN_FROM_PEAK": 0.20,  # 峰值回撤>20%强制卖出
@@ -101,14 +96,14 @@ class ConfigManager:
         "PROFIT_LOCK_RATIO": 0.50,  # 锁定50%浮盈（保本+2%）
     }
 
-    # 🆕 简单三档止盈参数（替代复杂的多层次止盈）
+    # 三档止盈参数
     SIMPLE_TAKE_PROFIT = {
         "L1": {"PROFIT_MIN": 0.20, "SELL_RATIO": 0.30},  # 盈利20%卖30%
         "L2": {"PROFIT_MIN": 0.40, "SELL_RATIO": 0.30},  # 盈利40%再卖30%（累计60%）
         # L3: 盈利>40%不卖，等待MA20止损
     }
 
-    # S2终版: 统一60m止盈止损 + 取消固定止盈 + 移动止盈安全网
+    # 双模参数配置
     DUAL_MODE_PARAMS = {
         "sideways": {
             "STOP_MA_PERIOD": 120,
@@ -214,16 +209,6 @@ class Common:
             r_pad = padding - l_pad
             return " " * l_pad + s + " " * r_pad
 
-    @staticmethod
-    def get_stock_name_safe(stock):
-        try:
-            fn = globals().get("get_stock_name")
-            if callable(fn):
-                name = fn(stock) if isinstance(stock, str) else stock
-                return {stock: name} if name else {stock: stock}
-        except Exception:
-            pass
-        return {stock: stock} if isinstance(stock, str) else {s: s for s in stock}
 
 
 # ==========================================
@@ -299,39 +284,6 @@ class DataCache:
                 DataCache._cache[cache_key] = stock_data
                 return stock_data
         return pd.DataFrame()
-
-    @staticmethod
-    def get_daily_data_from_parquet(stock, count, data_dir=None):
-        """从本地 parquet 文件读取日线数据（用于指数等静态数据）"""
-        from pathlib import Path as _Path
-
-        if data_dir is None:
-            data_dir = _Path(
-                r"C:\Users\Admin\SynologyDrive\PtradeProjects\SimTradeLab\data\cn\stocks"
-            )
-
-        parquet_path = _Path(data_dir) / f"{stock}.parquet"
-        if not parquet_path.exists():
-            return pd.DataFrame()
-
-        try:
-            df = pd.read_parquet(parquet_path)
-            if df.empty:
-                return pd.DataFrame()
-
-            today_str = getattr(g, "current_date_str", None)
-            if today_str and "date" in df.columns:
-                df = df[df["date"] <= today_str]
-
-            if "amount" in df.columns and "money" not in df.columns:
-                df["money"] = df["amount"]
-
-            result = df.tail(count).copy()
-            result.reset_index(drop=True, inplace=True)
-            return result
-
-        except Exception:
-            return pd.DataFrame()
 
     @staticmethod
     def preload_daily_data(stock_list, count):
@@ -952,43 +904,6 @@ class SelectionAgent:
         return (stock, estimated_float_mid, estimated_float_mid, money)
 
     @staticmethod
-    def _filter_by_price(step3_candidates):
-        """Step4: 股价预过滤"""
-        step4_candidates = []
-        for stock in step3_candidates:
-            try:
-                df = DataCache.get_daily_data(stock, 65)
-                if df.empty or len(df) < 5:
-                    step4_candidates.append(stock)
-                    continue
-
-                close = df["close"].iloc[-1]
-                if close >= ConfigManager.FILTER_CAPITAL["MAX_PRICE"]:
-                    continue
-
-                step4_candidates.append(stock)
-            except Exception:
-                step4_candidates.append(stock)
-        return step4_candidates
-
-    @staticmethod
-    def _filter_by_trend(step4_candidates):
-        """Step5: 趋势初筛增强"""
-        step5_candidates = []
-        for stock in step4_candidates:
-            try:
-                df = DataCache.get_daily_data(stock, 65)
-                if df.empty or len(df) < 20:
-                    step5_candidates.append(stock)
-                    continue
-
-                if SelectionAgent.enhanced_trend_filter(df):
-                    step5_candidates.append(stock)
-            except Exception:
-                step5_candidates.append(stock)
-        return step5_candidates
-
-    @staticmethod
     def _filter_by_price_and_trend(candidates):
         """Step4+5 合并: 股价+趋势单次循环过滤（减少一轮完整遍历）"""
         result = []
@@ -1037,16 +952,6 @@ class SelectionAgent:
 
         pass_count = sum([cond1, cond2, cond3])
         return pass_count >= 2
-
-    @staticmethod
-    def filter_by_fundamentals_and_price(stock, df):
-        """在日内或买入前进一步确认：市值和股价过滤"""
-        if df.empty:
-            return False
-        close = df["close"].iloc[-1]
-        if close > ConfigManager.FILTER_CAPITAL["MAX_PRICE"]:
-            return False
-        return True
 
     @staticmethod
     def score_breakout_stock(stock, df, volume_score_override=None, macd_score_override=None, ma_values_override=None):
@@ -1133,24 +1038,16 @@ class SelectionAgent:
     def select(context, stock_list, available_slots=3):
         """
         选股：识别高置信度启动形态，支持分级准入（S/A/B三级）
-
-        🆕 optimize_14 重构：
-        - ALLOW_2_OF_4模式：允许2/4条件通过即为B级（原需3/4）
-        - 放宽日内涨幅限制
-        - MACD正轴模式：允许强势股在正轴金叉
-
-        🆕 optimize_15 升级：
-        - 集成MarketDetector动态调整MIN_SCORE_B和返回数量
         """
         scored_stocks = []
         DataCache.preload_daily_data(stock_list, ConfigManager.MA_PERIODS["LONG"] + 10)
 
-        # 🆕 使用固定选股参数（不再依赖市场状态引擎）
+        # 选股参数
         allow_2_of_4 = ConfigManager.BREAKOUT.get("ALLOW_2_OF_4", True)
         allow_3_of_4 = ConfigManager.BREAKOUT.get("ALLOW_3_OF_4", True)
         min_conditions_for_b = ConfigManager.BREAKOUT.get("MIN_CONDITIONS_FOR_B", 2)
 
-        # 🆕 optimize_15: 集成市场模式检测，动态调整参数
+        # 市场模式检测，动态调整参数
         mode = MarketDetector.detect_market_mode(context)
         params = ConfigManager.DUAL_MODE_PARAMS.get(mode, {})
         min_score_b_dynamic = params.get("MIN_SCORE_B", 0.45)  # 动态B级最低分
@@ -1234,7 +1131,7 @@ class SelectionAgent:
                     and abs(macd) < macd_limit
                 )
 
-                # 🆕 正轴强势模式：MACD在零轴上方且金叉
+                # 正轴强势模式：MACD在零轴上方且金叉
                 positive_axis_mode = macd > 0 and signal > 0 and macd > signal
 
                 condition_macd = standard_cross or positive_axis_mode
@@ -1248,7 +1145,7 @@ class SelectionAgent:
             ]
             met_count = sum(1 for _, met in conditions_met if met)
 
-            # 🆕 分级准入判断（ALLOW_2_OF_4模式）
+            # 分级准入判断
             grade = None
             final_score = 0.0
 
@@ -1272,23 +1169,23 @@ class SelectionAgent:
                 base_score = SelectionAgent.score_breakout_stock(
                     stock, df, volume_score, macd_score, ma_values
                 )
-                if base_score > min_score_b_dynamic:  # 🆕 使用动态阈值
+                if base_score > min_score_b_dynamic:
                     grade = "B"
                     final_score = base_score
 
             elif met_count == 2 and allow_2_of_4:
-                # 🆕 2/4条件通过 → B级（放宽选股逻辑）
+                # 2/4条件通过 → B级
                 base_score = SelectionAgent.score_breakout_stock(
                     stock, df, volume_score, macd_score, ma_values
                 )
-                if base_score > (min_score_b_dynamic - 0.05):  # 🆕 使用动态阈值（略低）
+                if base_score > (min_score_b_dynamic - 0.05):
                     grade = "B"
                     final_score = base_score
 
             if grade in ["S", "A", "B"]:
                 scored_stocks.append((stock, final_score, grade))
 
-        # 按得分降序排列，返回 Top N 个结果（🆕 使用动态上限）
+        # 按得分降序排列，返回 Top N 个结果
         scored_stocks.sort(key=lambda x: x[1], reverse=True)
         top_n = min(
             max(available_slots * 2, ConfigManager.SCORING_TOP_K_MIN),
@@ -1404,11 +1301,7 @@ class ExecutionAgent:
 
     @staticmethod
     def buy_new(context, target_stocks):
-        """
-        🆕 新买入执行：双模自适应仓位分配（optimize_15 升级）
-
-        集成 MAX_POSITIONS_DAILY 限制，根据市场模式动态控制买入数量
-        """
+        """买入执行：双模自适应仓位分配"""
         current_positions = [
             stock
             for stock, pos in context.portfolio.positions.items()
@@ -1417,7 +1310,7 @@ class ExecutionAgent:
 
         available_slots = ConfigManager.MAX_POSITIONS - len(current_positions)
 
-        # 🆕 optimize_15: 集成市场模式检测，获取每日最大买入数量限制
+        # 集成市场模式检测，获取每日最大买入数量限制
         mode = MarketDetector.detect_market_mode(context)
         params = ConfigManager.DUAL_MODE_PARAMS.get(mode, {})
         max_daily_buys = params.get("MAX_POSITIONS_DAILY", 6)
@@ -1448,7 +1341,7 @@ class ExecutionAgent:
                 and grade in ("S", "A", "B")  # S级+A级+B级
             ][
                 :effective_slots
-            ]  # 🆕 使用动态限制
+            ]
 
             if not buy_targets:
                 log.info("无新的可买标的（全部已在持仓中或达到每日上限）。")
@@ -1569,14 +1462,11 @@ class ExecutionAgent:
 
     @staticmethod
     def buy_morning_entry(context, targets):
-        """
-        早盘入场执行（9:35窗口）
-        🆕 降低资金比例到10%（原30%）
-        """
+        """早盘入场执行（9:35窗口）"""
         if not targets:
             return
 
-        # 🆕 早盘入场最多使用10%总资金（从30%降低到10%）
+        # 早盘入场最多使用10%总资金
         max_morning_cash = context.portfolio.portfolio_value * 0.10
         available_cash = min(context.portfolio.cash, max_morning_cash)
 
@@ -1621,15 +1511,10 @@ class ExecutionAgent:
 
 
 # ==========================================
-# 6. MarketDetector: 双模市场环境检测器（🆕 optimize_15 新增）
+# 6. MarketDetector: 双模市场环境检测器
 # ==========================================
 class MarketDetector:
-    """
-    简化版市场环境检测（基于持仓组合表现）
-
-    不依赖外部指数数据（因为000300.SS数据静态）
-    使用当前持仓组合的平均表现作为市场冷暖代理指标
-    """
+    """市场环境检测（基于持仓组合表现）"""
 
     @staticmethod
     def detect_market_mode(context):
@@ -1684,18 +1569,10 @@ class MarketDetector:
 
 
 # ==========================================
-# 7. PositionAgent: MA20跟踪止损 + 简单三档止盈（optimize_14 核心重构 + optimize_15 双模升级）
+# 7. PositionAgent: MA20跟踪止损 + 三档止盈
 # ==========================================
 class PositionAgent:
-    """
-    盘中风控与MA20跟踪止损
-
-    🆕 optimize_14 核心改动：
-    - 删除ATR吊灯止损系统（~500行旧代码）
-    - 采用MA20跟踪止损替代复杂系统
-    - 简单三档止盈（L1:20%, L2:40%, L3:>40%不卖）
-    - 防御性编程：安全盈利计算（解决386674%异常BUG）
-    """
+    """盘中风控与MA20跟踪止损"""
 
     @staticmethod
     def calc_profit_ratio_safely(pos):
@@ -1768,14 +1645,7 @@ class PositionAgent:
 
     @staticmethod
     def check_intraday_exit(context):
-        """
-        🆕 双模自适应盘中风控（optimize_15 升级）
-
-        根据 MarketDetector.detect_market_mode() 结果选择不同参数：
-        - 震荡市：日线MA20 + 2根K线确认 + 保守止盈
-        - 牛市：15分钟MA20 + 立即执行 + 激进持有
-        - 下降趋势：极度保守，快速止损
-        """
+        """双模自适应盘中风控"""
         # 检测当前市场模式
         mode = MarketDetector.detect_market_mode(context)
         params = ConfigManager.DUAL_MODE_PARAMS.get(
@@ -1934,13 +1804,7 @@ class PositionAgent:
     @staticmethod
     def simple_take_profit(context, stock, pos, profit_ratio, mode="sideways"):
         """
-        🆕 双模自适应止盈（optimize_15 升级）
-
-        震荡市：10%/20% 两档（快速锁定利润）
-        牛市：25%/50% 两档（让利润奔跑）
-        下降趋势：5%/10% 两档（保本为主）
-
-        新增：最小金额检查（>=2000元才操作），避免"卖出金额不足100股"错误
+        双模自适应止盈
         """
         # 根据市场模式获取止盈参数
         params = ConfigManager.DUAL_MODE_PARAMS.get(
@@ -2002,10 +1866,10 @@ class PositionAgent:
 
 
 # ==========================================
-# 7. ReportAgent: 盘后报表生成（复刻v0.36格式）
+# 8. ReportAgent: 盘后报表生成
 # ==========================================
 class ReportAgent:
-    """盘后报表生成，输出账户汇总、持仓明细、盈亏统计、持仓评分"""
+    """盘后报表生成，输出账户汇总、持仓明细、盈亏统计"""
 
     SEP = "=" * 135
     LINE_SEP = "-" * 135
@@ -2154,7 +2018,7 @@ class ReportAgent:
 
     @staticmethod
     def generate_profit_loss_report(context):
-        """生成盈亏统计报表（复刻v0.36 Profit Loss Report）"""
+        """生成盈亏统计报表"""
         traded_stocks = getattr(g, "_traded_stocks", set())
         trade_history = getattr(g, "_trade_history", [])
 
@@ -2284,29 +2148,8 @@ class ReportAgent:
         log.info(ReportAgent.STAR_SEP)
 
     @staticmethod
-    def _get_price_at(stock, date_str):
-        """获取指定日期或之前的收盘价"""
-        try:
-            df = DataCache.get_daily_data(stock, 30)
-            if df.empty:
-                return 0.0
-            target = pd.Timestamp(date_str)
-            if isinstance(df.index, pd.DatetimeIndex):
-                mask = df.index <= target
-                if mask.any():
-                    return float(df.loc[mask, "close"].iloc[-1])
-            if "date" in df.columns:
-                dates = pd.to_datetime(df["date"])
-                mask = dates <= target
-                if mask.any():
-                    return float(df.loc[mask.values, "close"].iloc[-1])
-            return float(df["close"].iloc[0])
-        except Exception:
-            return 0.0
-
-    @staticmethod
     def log_selection_list(context, scored_stocks):
-        """输出每日选股列表（按得分降序前10名，复刻v0.36格式）"""
+        """输出每日选股列表"""
         if not scored_stocks:
             return
 
@@ -2409,69 +2252,6 @@ class ReportAgent:
 
         log.info("[趋势跟踪] " + sep)
 
-    @staticmethod
-    def evaluate_positions(context):
-        """持仓评分排名"""
-        positions = context.portfolio.positions
-        if not positions or not any(p.amount > 0 for p in positions.values()):
-            return
-
-        log.info("[持仓评估] 开始评估 {} 只持仓...".format(
-            sum(1 for p in positions.values() if p.amount > 0)
-        ))
-
-        position_scores = []
-        for stock, pos in positions.items():
-            if pos.amount <= 0:
-                continue
-            try:
-                df = DataCache.get_daily_data(stock, 60)
-                if df.empty or len(df) < 20:
-                    continue
-
-                profit_result = PositionAgent.calc_profit_ratio_safely(pos)
-                pnl_pct = profit_result[0] if profit_result[0] is not None else 0
-
-                holding_days = 0
-                if hasattr(g, "_holding_start_date") and stock in g._holding_start_date:
-                    hd = g._holding_start_date[stock]
-                    holding_days = (context.current_dt.date() - hd).days if hasattr(hd, "days") else (context.current_dt.date() - hd).days
-
-                close = df["close"]
-                ma20 = close.rolling(20).mean().iloc[-1]
-                ma_trend_score = 1.0 if close.iloc[-1] > ma20 else 0.0
-
-                vol = df["volume"]
-                vol_5d = vol.rolling(5).mean().iloc[-1]
-                vol_20d = vol.rolling(20).mean().iloc[-1]
-                vol_score = 1.0 if vol_5d > vol_20d * 0.8 else 0.5
-
-                holding_score = 1.0 if holding_days < 10 else 0.5 if holding_days < 20 else 0.0
-                pnl_score = 1.0 if pnl_pct > 0.1 else 0.5 if pnl_pct > 0 else 0.0
-
-                total_score = (
-                    pnl_score * 0.30 + holding_score * 0.15
-                    + ma_trend_score * 0.20 + vol_score * 0.15
-                    + 0.20  # 基础分
-                )
-
-                position_scores.append({
-                    "stock": stock, "score": total_score,
-                    "pnl_pct": pnl_pct, "days_held": holding_days,
-                })
-            except Exception:
-                continue
-
-        if not position_scores:
-            return
-
-        position_scores.sort(key=lambda x: x["score"], reverse=True)
-        log.info("[持仓评分] 排名:")
-        for i, ps in enumerate(position_scores):
-            log.info("  {}. {} 评分{:.2f} 盈亏{:.1%} 持仓{}天".format(
-                i + 1, ps["stock"], ps["score"], ps["pnl_pct"], ps["days_held"]
-            ))
-
 
 
 # ==========================================
@@ -2480,15 +2260,7 @@ class ReportAgent:
 
 
 def initialize(context):
-    """
-    S2终版初始化
-
-    核心配置:
-    - 统一60m止损频率
-    - 取消固定止盈(L1/L2=999%) + 移动止盈(回撤15%)
-    - 只买入S级股票，S级权重3x
-    - 按模式差异化仓位: sideways=50%, uptrend=95%, downtrend=30%
-    """
+    """策略初始化"""
     g.security = ConfigManager.BENCHMARK_INDEX
     set_universe(g.security)
 
@@ -2515,14 +2287,7 @@ def initialize(context):
 
 
 def before_trading_start(context, data):
-    """
-    开盘前准备（optimize_14 精简版）
-
-    功能：
-    - 更新日期字符串
-    - 内存优化：清理旧缓存
-    - 🆕 删除市场状态引擎调用（MarketAgent.analyze_market已删除）
-    """
+    """开盘前准备"""
     g.current_date_str = context.current_dt.strftime("%Y-%m-%d")
 
     DataCache.clear_old_cache(g.current_date_str)
@@ -2532,17 +2297,12 @@ def before_trading_start(context, data):
 
 def handle_data(context, data):
     """
-    盘中逻辑（optimize_14 精简版）
+    盘中逻辑
 
     时间节点：
-    - 09:35: 早盘入场分支（降低优先级）
+    - 09:35: 早盘入场分支
     - 09:35~14:55: 15分钟截流，MA20跟踪止损
-    - 14:30: 主力入场分支（四重条件选股 + 买入）
-
-    🆕 主要变更：
-    - 删除RiskManager.check_daily_loss_limit/check_drawdown_limit调用
-    - 删除14:25止盈检查（整合到PositionAgent.check_intraday_exit中）
-    - 简化风控调用（只调用PositionAgent.check_intraday_exit）
+    - 14:30: 主力入场分支
     """
     dt = context.current_dt
     h, m = dt.hour, dt.minute
@@ -2554,9 +2314,9 @@ def handle_data(context, data):
     if m % 5 != 0:
         return
 
-    # 1. 9:35 早盘入场分支（🆕 optimize_15: 双模动态开关）
+    # 1. 9:35 早盘入场分支
     if h == 9 and m == 35:
-        # 🆕 检测市场模式，决定是否启用早盘入场
+        # 检测市场模式，决定是否启用早盘入场
         mode = MarketDetector.detect_market_mode(context)
         params = ConfigManager.DUAL_MODE_PARAMS.get(mode, {})
 
