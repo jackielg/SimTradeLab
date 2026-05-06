@@ -48,7 +48,7 @@ Python >=3.10, Poetry, Ruff (lint), Pydantic (config), src/ layout
 <!-- gitnexus:start -->
 # GitNexus — Code Intelligence
 
-This project is indexed by GitNexus as **SimTradeLab** (5015 symbols, 6387 relationships, 49 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
+This project is indexed by GitNexus as **SimTradeLab** (5009 symbols, 6381 relationships, 49 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
 
 > If any GitNexus tool warns the index is stale, run `npx gitnexus analyze` in terminal first.
 
