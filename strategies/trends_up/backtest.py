@@ -556,22 +556,22 @@ class SelectionAgent:
         # 数据预加载
         t_step = datetime.datetime.now()
         DataCache.preload_daily_data(step2_candidates, 65)
-        log.info("   📦 数据预加载      → %d 只  (%.1fs)  [65日数据]" % (len(step2_candidates), (datetime.datetime.now() - t_step).total_seconds()))
+        log.info("3️⃣  数据预加载        → %d 只  (%.1fs)  [65日数据]" % (len(step2_candidates), (datetime.datetime.now() - t_step).total_seconds()))
 
         # Step3: 财务过滤（市值约束）
         t_step = datetime.datetime.now()
         step3_candidates, step3_fallback_count, step3_stats = (
             SelectionAgent._filter_by_market_cap(step2_candidates)
         )
-        log.info("3️⃣  市值过滤          → %d 只  (%.1fs)" % (len(step3_candidates), (datetime.datetime.now() - t_step).total_seconds()))
+        log.info("4️⃣  市值过滤          → %d 只  (%.1fs)" % (len(step3_candidates), (datetime.datetime.now() - t_step).total_seconds()))
 
         # Step4+5: 股价+趋势合并过滤
         t_step = datetime.datetime.now()
         step5_candidates = SelectionAgent._filter_by_price_and_trend(step3_candidates)
-        log.info("4️⃣  股价+趋势过滤     → %d 只  (%.1fs)  [MAX_PRICE<80, MA20>MA60]" % (len(step5_candidates), (datetime.datetime.now() - t_step).total_seconds()))
+        log.info("5️⃣  股价+趋势过滤     → %d 只  (%.1fs)  [MAX_PRICE<80, MA20>MA60]" % (len(step5_candidates), (datetime.datetime.now() - t_step).total_seconds()))
 
         # Step6: 预选池最终确认
-        log.info("5️⃣  预选池确认        → %d 只" % len(step5_candidates))
+        log.info("6️⃣  预选池确认        → %d 只" % len(step5_candidates))
 
         elapsed_total = (datetime.datetime.now() - t_total).total_seconds()
         log.info("─" * 80)
@@ -1299,7 +1299,7 @@ class ExecutionAgent:
             ]
 
             if not buy_targets:
-                log.info("无新的可买标的（全部已在持仓中或达到每日上限）。")
+                log.info("🛡️🛡️🛡️ 无新的可买标的（全部已在持仓中或达到每日上限）。")
                 return
 
             # 根据级别分配资金比例
@@ -1320,20 +1320,20 @@ class ExecutionAgent:
                     )
                     if day_change > grade_max:
                         log.info(
-                            f"[买入放弃] {stock}, 日内涨幅{day_change*100:.1f}% "
+                            f"[买入放弃] {stock}, 日内涨幅{day_change*100:.2f}% "
                             f"超过{grade}级上限{grade_max*100:.0f}%"
                         )
                         continue
                     elif day_change > ConfigManager.BUY_PRICE_LIMIT["WARN_DAY_CHANGE"]:
                         cash_per_stock *= 0.5
                         log.info(
-                            f"[买入减仓] {stock}, 日内涨幅{day_change*100:.1f}% "
-                            f"超过预警线, 仓位减半至{cash_per_stock:.2f}"
+                            f"🚀🚀🚀 [买入减仓] {stock}, 日内涨幅{day_change*100:.2f}% "
+                            f"超过预警线, 仓位减半至{cash_per_stock:.0f}"
                         )
 
                 order_value(stock, cash_per_stock)
                 log.info(
-                    f"[买入][{grade}级] {stock}, 金额: {cash_per_stock:.2f}, 得分: {score:.3f}"
+                    f"🚀🚀🚀 [买入][{grade}级] {stock}, 金额: {cash_per_stock:.0f}, 得分: {score:.3f}"
                 )
 
                 # 记录买入状态
@@ -1356,7 +1356,7 @@ class ExecutionAgent:
             )
 
             if weakest_stock is None or len(target_stocks) == 0:
-                log.info("无法执行轮换（无可替换持仓或无新标的）。")
+                log.info("🛡️🛡️🛡️ 无法执行轮换（无可替换持仓或无新标的）。")
                 return
 
             new_stock, new_score, new_grade = target_stocks[0]
@@ -1368,7 +1368,7 @@ class ExecutionAgent:
                 should_rotate = True
 
             log.info(
-                f"[轮换评估] 最弱持仓: {weakest_stock} 收益{weakest_profit:.2%} "
+                f"{'♻️♻️♻️' if should_rotate else '🛡️🛡️🛡️'} [轮换评估] 最弱持仓: {weakest_stock} 收益{weakest_profit:.2%} "
                 f"vs 新标的: {new_stock}[{new_grade}级] 得分{new_score:.3f} "
                 f"{'-> 触发替换' if should_rotate else '-> 不替换'}"
             )
@@ -1377,20 +1377,20 @@ class ExecutionAgent:
                 if not hasattr(g, "_rotation_cooldown"):
                     g._rotation_cooldown = {}
                 if weakest_stock in g._rotation_cooldown:
-                    log.info(f"[轮换冷却] {weakest_stock} 在冷却期内，跳过轮换")
+                    log.info(f"🛡️🛡️🛡️ [轮换冷却] {weakest_stock} 在冷却期内，跳过轮换")
                     return
 
                 cash_per_stock = actual_cash_to_use / 1
 
                 order_target(weakest_stock, 0)
-                log.info(f"[轮换] 卖出 {weakest_stock} (收益{weakest_profit*100:.2f}%)")
+                log.info(f"♻️♻️♻️ [轮换] 卖出 {weakest_stock} (收益{weakest_profit*100:.2f}%)")
 
                 g._peak_prices.pop(weakest_stock, None)
                 g._buy_prices.pop(weakest_stock, None)
 
                 order_value(new_stock, cash_per_stock)
                 log.info(
-                    f"[轮换] 买入 {new_stock}[{new_grade}级] (得分{new_score:.3f}), 金额: {cash_per_stock:.2f}"
+                    f"🚀🚀🚀 [轮换] 买入 {new_stock}[{new_grade}级] (得分{new_score:.3f}), 金额: {cash_per_stock:.0f}"
                 )
 
                 if not hasattr(g, "_holding_start_date"):
@@ -1409,11 +1409,11 @@ class ExecutionAgent:
                 g._rotation_cooldown[weakest_stock] = context.current_dt.date()
             else:
                 log.info(
-                    f"[轮换] 条件不满足（最弱持仓收益{weakest_profit*100:.2f}%，"
+                    f"🛡️🛡️🛡️ [轮换] 条件不满足（最弱持仓收益{weakest_profit*100:.2f}%，"
                     f"新标的{new_grade}级），维持原持仓"
                 )
         else:
-            log.info("已达到最大持仓上限且轮换未启用，放弃买入。")
+            log.info("🛡️🛡️🛡️ 已达到最大持仓上限且轮换未启用，放弃买入。")
 
     @staticmethod
     def buy_morning_entry(context, targets):
@@ -1426,7 +1426,7 @@ class ExecutionAgent:
         available_cash = min(context.portfolio.cash, max_morning_cash)
 
         if available_cash < 10000:
-            log.info("[早盘入场] 可用资金不足，放弃早盘入场。")
+            log.info("🛡️🛡️🛡️ [早盘入场] 可用资金不足，放弃早盘入场。")
             return
 
         current_positions = [
@@ -1437,7 +1437,7 @@ class ExecutionAgent:
 
         max_morning_buys = min(3, ConfigManager.MAX_POSITIONS - len(current_positions))
         if max_morning_buys <= 0:
-            log.info("[早盘入场] 已达到最大持仓上限，放弃早盘入场。")
+            log.info("🛡️🛡️🛡️ [早盘入场] 已达到最大持仓上限，放弃早盘入场。")
             return
 
         buy_targets = targets[:max_morning_buys]
@@ -1449,8 +1449,8 @@ class ExecutionAgent:
 
             order_value(stock, cash_per_stock)
             log.info(
-                f"[早盘买入] {stock}, 跳空{gap_ratio:.1f}%, 置信度{confidence:.2f}, "
-                f"金额: {cash_per_stock:.2f}"
+                f"🚀🚀🚀 [早盘买入] {stock}, 跳空{gap_ratio:.1f}%, 置信度{confidence:.2f}, "
+                f"金额: {cash_per_stock:.0f}"
             )
 
             if not hasattr(g, "_holding_start_date"):
@@ -1566,7 +1566,7 @@ class PositionAgent:
 
             # 边界检查：正常范围-99%~+500%（允许5倍盈利）
             if abs(profit_ratio) > 5.0:
-                log.warning(f"[防御] 盈利比例异常{profit_ratio*100:.1f}%，已截断")
+                log.warning(f"[防御] 盈利比例异常{profit_ratio*100:.2f}%，已截断")
                 profit_ratio = max(-0.99, min(5.0, profit_ratio))
 
             return profit_ratio, avg_price
@@ -1671,7 +1671,7 @@ class PositionAgent:
                 if drawdown_from_peak > max_drawdown:
                     order_target(stock, 0)
                     log.info(
-                        f"[{mode}峰值回撤] {stock}, 回撤{drawdown_from_peak*100:.1f}% "
+                        f"♻️♻️♻️ [{mode}峰值回撤] {stock}, 回撤{drawdown_from_peak*100:.2f}% "
                         f">(>{max_drawdown*100:.0f}%), 现价: {close:.2f}"
                     )
                     PositionAgent.cleanup_state(stock)
@@ -1695,16 +1695,16 @@ class PositionAgent:
                     ):
                         order_target(stock, 0)
                         log.info(
-                            f"[{mode}止损-确认] {stock}, 现价{close:.2f} < MA{ma_period}{ma:.2f}, "
-                            f"盈利{profit_ratio*100:.1f}%"
+                            f"♻️♻️♻️ [{mode}止损-确认] {stock}, 现价{close:.2f} < MA{ma_period}{ma:.2f}, "
+                            f"盈利{profit_ratio*100:.2f}%"
                         )
                         PositionAgent.cleanup_state(stock)
                 else:
                     # 牛市/下降趋势：立即止损
                     order_target(stock, 0)
                     log.info(
-                        f"[{mode}止损] {stock}, 价格{close:.2f}跌破MA{ma_period}({ma:.2f}), "
-                        f"盈利{profit_ratio*100:.1f}%"
+                        f"♻️♻️♻️ [{mode}止损] {stock}, 价格{close:.2f}跌破MA{ma_period}({ma:.2f}), "
+                        f"盈利{profit_ratio*100:.2f}%"
                     )
                     PositionAgent.cleanup_state(stock)
                 continue
@@ -1731,7 +1731,7 @@ class PositionAgent:
                 if close < locked_price and close < ma:
                     order_target(stock, 0)
                     log.info(
-                        f"[保本-{mode}] {stock}, 现价{close:.2f} < 保本线{locked_price:.2f}"
+                        f"♻️♻️♻️ [保本-{mode}] {stock}, 现价{close:.2f} < 保本线{locked_price:.2f}"
                     )
                     PositionAgent.cleanup_state(stock)
                     continue
@@ -1749,7 +1749,7 @@ class PositionAgent:
                 if peak > 0 and close < peak * (1 - 0.15):
                     order_target(stock, 0)
                     log.info(
-                        f"[移动止盈] {stock}, 现价{close:.2f} < 峰值回撤线{peak*0.85:.2f}(峰值{peak:.2f}, 回撤{-((close/peak-1)*100):.1f}%)"
+                        f"♻️♻️♻️ [移动止盈] {stock}, 现价{close:.2f} < 峰值回撤线{peak*0.85:.2f}(峰值{peak:.2f}, 回撤{-((close/peak-1)*100):.2f}%)"
                     )
                     if stock in context._trailing_peaks:
                         del context._trailing_peaks[stock]
@@ -1792,7 +1792,7 @@ class PositionAgent:
                 if sell_value >= min_sell_value:
                     order_value(stock, -sell_value)
                     log.info(
-                        f"[止盈-L1-{mode}] {stock}, 盈利{profit_ratio*100:.1f}%, "
+                        f"♻️♻️♻️ [止盈-L1-{mode}] {stock}, 盈利{profit_ratio*100:.2f}%, "
                         f"卖{l1['SELL_RATIO']*100:.0f}%(金额{sell_value:.0f})"
                     )
                 else:
@@ -1807,7 +1807,7 @@ class PositionAgent:
                 if sell_value >= min_sell_value:
                     order_value(stock, -sell_value)
                     log.info(
-                        f"[止盈-L2-{mode}] {stock}, 盈利{profit_ratio*100:.1f}%, "
+                        f"♻️♻️♻️ [止盈-L2-{mode}] {stock}, 盈利{profit_ratio*100:.2f}%, "
                         f"再卖{config['L2']['SELL_RATIO']*100:.0f}%(金额{sell_value:.0f})"
                     )
                 else:
@@ -2180,8 +2180,8 @@ class ReportAgent:
         log.info("─" * 80)
         log.info("📈 选股结果 (%d 只)" % len(top10))
         log.info("─" * 80)
-        log.info("  股票代码    股票名称    总市值(亿)  流通市值(亿)  当前价   得分   级别  仓位")
-        log.info("  " + "─" * 76)
+        log.info("  股票代码    股票名称    总市值(亿)  流通市值(亿)  当前价    得分   级别   仓位")
+        log.info("  " + "─" * 78)
 
         for stock, score, grade in top10:
             try:
@@ -2195,7 +2195,7 @@ class ReportAgent:
                 float_str = "{:.2f}".format(float_yi) if float_yi > 0 else "N/A"
 
                 log.info(
-                    "  {:<10} {:<8}  {:>8}  {:>8}  {:>6.2f}  {:>6.3f}  {:>2}  {:>4}".format(
+                    "  {:<12}{:<9}  {:>6}  {:>8}  {:>8.2f} {:>8.3f} {:>4}  {:>5}".format(
                         stock, stock_name, total_str, float_str,
                         current_price, float(score), grade, pos_str,
                     )
@@ -2347,7 +2347,7 @@ def handle_data(context, data):
 
             ExecutionAgent.buy_new(context, unique_candidates)
         else:
-            log.info("未发现符合买入条件的个股。")
+            log.info("🛡️🛡️🛡️ 未发现符合买入条件的个股。")
 
 
 def after_trading_end(context, data):
@@ -2466,6 +2466,11 @@ def on_trade_response(context, trade_list):
 
         commission = float(get_trade_field(trade, "commission", 0) or 0)
 
+        # 成交状态
+        status_code = str(get_trade_field(trade, "status", "") or "")
+        STATUS_MAP = {"0": "未报", "1": "待报", "2": "已报", "3": "已报待撤", "4": "部成待撤", "5": "部撤", "6": "已撤", "7": "部成", "8": "已成", "9": "废单", "+": "已受理", "-": "已确认", "V": "已确认"}
+        status_str = STATUS_MAP.get(status_code, status_code) if status_code else "未知"
+
         entrust_bs = get_trade_field(trade, "entrust_direction", "")
         if not entrust_bs:
             entrust_bs = get_trade_field(trade, "entrust_bs", "")
@@ -2503,8 +2508,8 @@ def on_trade_response(context, trade_list):
             content += record_line
             Common.safe_write_file("交易详情_trends_up.csv", content.encode("gbk"))
             log.info(
-                "[PnL_Update] {} {}: qty={:.0f} price={:.2f} fees={:.2f}".format(
-                    stock, action_str, abs(amount), price, commission
+                "🔔🔔🔔 [成交回报]  {} {} {}  价格={:.2f}  数量={:.0f}  手续费={:.2f}".format(
+                    stock, action_str, status_str, price, abs(amount), commission
                 )
             )
         except Exception as e:
