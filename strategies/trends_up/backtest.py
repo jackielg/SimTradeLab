@@ -24,7 +24,7 @@ class ConfigManager:
 
     # 选股漏斗阈值
     FILTER_CAPITAL = {
-        "MIN_TOTAL_CAPITAL": 30e8,  # 总市值 > 30亿
+        "MIN_TOTAL_CAPITAL": 50e8,  # 总市值 > 50亿（30→50，排除小盘垃圾股）
         "MAX_TOTAL_CAPITAL": 200e8,  # 总市值 < 200亿
         "MAX_FLOAT_CAPITAL": 80e8,  # 流通市值 < 80亿
         "MAX_PRICE": 80.0,  # 股价 < 80元
@@ -63,6 +63,8 @@ class ConfigManager:
         "ALLOW_3_OF_4": True,
         "ALLOW_2_OF_4": True,
         "MIN_CONDITIONS_FOR_B": 2,
+        "VOL_SUSTAIN_RATIO": 1.2,  # 新增: 成交量持续性（近5日>20日×1.2）
+        "RELATIVE_STRENGTH": True,  # 新增: 相对强度过滤（近20日>沪深300）
     }
 
     # 数据缓存配置
@@ -96,6 +98,13 @@ class ConfigManager:
         "PROFIT_LOCK_RATIO": 0.50,  # 锁定50%浮盈（保本+2%）
     }
 
+    # 硬止损参数（解决2024年"冻死"问题）
+    HARD_STOP = {
+        "MAX_LOSS": -0.12,  # revert to -12%（-10%伤害2025收益）
+        "TIME_STOP_DAYS": 30,
+        "TIME_STOP_LOSS": -0.05,
+    }
+
     # 三档止盈参数
     SIMPLE_TAKE_PROFIT = {
         "L1": {"PROFIT_MIN": 0.20, "SELL_RATIO": 0.30},  # 盈利20%卖30%
@@ -111,7 +120,7 @@ class ConfigManager:
             "TAKE_PROFIT_L1": 9.99,
             "TAKE_PROFIT_L2": 9.99,
             "MAX_POSITIONS_DAILY": 6,
-            "MIN_SCORE_B": 0.20,
+            "MIN_SCORE_B": 0.45,  # 0.20→0.45（提高选股标准）
             "MORNING_ENTRY_ENABLED": True,
             "CONFIRM_STOP_BARS": 5,
         },
@@ -121,18 +130,18 @@ class ConfigManager:
             "TAKE_PROFIT_L1": 9.99,
             "TAKE_PROFIT_L2": 9.99,
             "MAX_POSITIONS_DAILY": 6,
-            "MIN_SCORE_B": 0.20,
+            "MIN_SCORE_B": 0.45,  # 0.20→0.45（提高选股标准）
             "MORNING_ENTRY_ENABLED": True,
             "CONFIRM_STOP_BARS": 5,
         },
         "trending_downtrend": {
-            "STOP_MA_PERIOD": 120,
+            "STOP_MA_PERIOD": 60,  # 120→60（更快止损，避免2024年冻死）
             "STOP_DATA_FREQUENCY": "daily",
             "TAKE_PROFIT_L1": 0.10,
             "TAKE_PROFIT_L2": 0.20,
-            "MAX_POSITIONS_DAILY": 6,
-            "MIN_SCORE_B": 0.30,
-            "MORNING_ENTRY_ENABLED": True,
+            "MAX_POSITIONS_DAILY": 3,  # 6→3
+            "MIN_SCORE_B": 0.55,  # 0.30→0.55（更严格选股）
+            "MORNING_ENTRY_ENABLED": False,  # True→False（downtrend禁止早盘入场）
             "CONFIRM_STOP_BARS": 3,
         },
     }
@@ -1001,8 +1010,8 @@ class SelectionAgent:
         allow_3_of_4 = ConfigManager.BREAKOUT.get("ALLOW_3_OF_4", True)
         min_conditions_for_b = ConfigManager.BREAKOUT.get("MIN_CONDITIONS_FOR_B", 2)
 
-        # 市场模式检测，动态调整参数
-        mode = MarketDetector.detect_market_mode(context)
+        # 市场模式检测，动态调整参数（使用v2版本）
+        mode = MarketDetector.detect_market_mode_v2(context)
         params = ConfigManager.DUAL_MODE_PARAMS.get(mode, {})
         min_score_b_dynamic = params.get("MIN_SCORE_B", 0.45)  # 动态B级最低分
         max_positions_daily = params.get("MAX_POSITIONS_DAILY", 6)  # 每日最大买入数
@@ -1014,6 +1023,19 @@ class SelectionAgent:
         log.info("  市场模式: %s | MIN_SCORE_B: %.2f | MAX_DAILY: %d" % (mode, min_score_b_dynamic, max_positions_daily))
         log.info("  ALLOW_2_OF_4: %s | ALLOW_3_OF_4: %s" % (allow_2_of_4, allow_3_of_4))
 
+        # 预加载沪深300数据用于相对强度过滤
+        df_index = None
+        if ConfigManager.BREAKOUT.get("RELATIVE_STRENGTH", False):
+            df_index = DataCache.get_daily_data(ConfigManager.BENCHMARK_INDEX, 25)
+            if df_index is not None and not df_index.empty and len(df_index) >= 20:
+                index_return_20d = (
+                    df_index["close"].iloc[-1] / df_index["close"].iloc[-20] - 1
+                )
+            else:
+                index_return_20d = None
+        else:
+            index_return_20d = None
+
         for stock in stock_list:
             df = DataCache.get_daily_data(stock, ConfigManager.MA_PERIODS["LONG"] + 10)
             if df.empty or len(df) < ConfigManager.MA_PERIODS["LONG"]:
@@ -1021,6 +1043,19 @@ class SelectionAgent:
 
             close = df["close"].iloc[-1]
             vol = df["volume"].iloc[-1]
+
+            # 新增: 成交量持续性过滤（近5日均量 > 20日均量 × 1.2）
+            if ConfigManager.BREAKOUT.get("VOL_SUSTAIN_RATIO", 0) > 0:
+                vol_ma5 = df["volume"].rolling(5).mean().iloc[-1]
+                vol_ma20 = df["volume"].rolling(20).mean().iloc[-1]
+                if vol_ma20 > 0 and vol_ma5 / vol_ma20 < ConfigManager.BREAKOUT["VOL_SUSTAIN_RATIO"]:
+                    continue  # 量能不足，跳过
+
+            # 新增: 相对强度过滤（近20日涨幅 > 沪深300同期涨幅）
+            if index_return_20d is not None and len(df) >= 20:
+                stock_return_20d = close / df["close"].iloc[-20] - 1
+                if stock_return_20d < index_return_20d:
+                    continue  # 弱于大盘，跳过
 
             # 1. 均线粘合（一次计算，后续传递给 score_breakout_stock）
             ma_short = (
@@ -1265,25 +1300,33 @@ class ExecutionAgent:
 
         available_slots = ConfigManager.MAX_POSITIONS - len(current_positions)
 
-        # 集成市场模式检测，获取每日最大买入数量限制
-        mode = MarketDetector.detect_market_mode(context)
+        # 集成市场模式检测，获取每日最大买入数量限制（使用v2版本）
+        mode = MarketDetector.detect_market_mode_v2(context)
         params = ConfigManager.DUAL_MODE_PARAMS.get(mode, {})
         max_daily_buys = params.get("MAX_POSITIONS_DAILY", 6)
 
         # 取两者中的较小值：可用槽位 vs 每日限制
         effective_slots = min(available_slots, max_daily_buys)
 
+        # 新增: 首日建仓限制（最多3只，保留40%现金作为缓冲）
+        if len(current_positions) == 0:
+            effective_slots = min(effective_slots, 3)
+            log.info("[首日建仓] 限制买入{}只，保留40%现金缓冲".format(effective_slots))
+
         cash = context.portfolio.cash
         max_pos_ratio = (
-            0.98
+            0.90
             if mode == "trending_uptrend"
-            else (0.80 if mode == "sideways" else 0.60)
-        )  # 按市场模式差异化仓位(更激进)
+            else (0.80 if mode == "sideways" else 0.30)
+        )  # sideways 80%（迭代4最优配置：2024年-0.97%，2025年+62.24%）
         target_total_value = context.portfolio.portfolio_value * max_pos_ratio
         current_pos_value = context.portfolio.positions_value
         allowable_cash = max(0, target_total_value - current_pos_value)
 
-        actual_cash_to_use = min(cash, allowable_cash)
+        # 新增: 现金保留线（始终保留10%现金）
+        cash_reserve = context.portfolio.portfolio_value * 0.10
+        actual_cash_to_use = min(cash - cash_reserve, allowable_cash)
+
         if actual_cash_to_use <= 10000:
             log.info("可用资金不足10000元，放弃买入。")
             return
@@ -1522,6 +1565,99 @@ class MarketDetector:
             log.debug(f"[市场模式检测异常] {e}")
             return "unknown"
 
+    @staticmethod
+    def detect_market_mode_v2(context):
+        """
+        基于大盘指数的市场模式检测（领先指标，避免optimization_01的频繁切换问题）
+
+        核心原则（从optimization_01失败经验提炼）：
+        1. 只用2个指标（MA20/MA60 + 5日涨跌幅），不用6个
+        2. 3天确认延迟（防止频繁切换）
+        3. 不做渐进式调仓（Phase 3证明无收益）
+        4. 不做预警止损（Phase 3证明无效）
+
+        返回：'sideways', 'trending_uptrend', 'trending_downtrend', 'unknown'
+        """
+        try:
+            # 获取沪深300日线数据
+            df_index = DataCache.get_daily_data(ConfigManager.BENCHMARK_INDEX, 65)
+            if df_index is None or df_index.empty or len(df_index) < 60:
+                # 降级到旧方法
+                return MarketDetector.detect_market_mode(context)
+
+            ma20 = df_index["close"].rolling(20).mean().iloc[-1]
+            ma60 = df_index["close"].rolling(60).mean().iloc[-1]
+            close = df_index["close"].iloc[-1]
+
+            # 近5日涨跌幅
+            recent_5d_return = (
+                df_index["close"].iloc[-1] / df_index["close"].iloc[-6] - 1
+            )
+
+            # 基础模式判断
+            if ma20 > ma60 and close > ma20:
+                raw_mode = "trending_uptrend"
+            elif ma20 < ma60 and recent_5d_return < -0.02:  # -0.03→-0.02（更敏感）
+                raw_mode = "trending_downtrend"
+            elif ma20 < ma60 and recent_5d_return < -0.03:  # 新增: -5%>-3%之间的也视为downtrend
+                raw_mode = "trending_downtrend"
+            elif ma20 < ma60:
+                # 新增: 从近期峰值大幅回撤（>7%）视为隐含downtrend（补充MA判断的滞后性）
+                recent_peak = df_index["close"].rolling(20).max().iloc[-1]
+                drawdown_from_peak = (recent_peak - close) / recent_peak
+                if drawdown_from_peak > 0.07:  # 0.10→0.07（更敏感）
+                    raw_mode = "trending_downtrend"
+                else:
+                    raw_mode = "sideways"
+            else:
+                raw_mode = "sideways"
+
+            # 3天确认机制（防止频繁切换，optimization_01教训：切换频率是2025收益的决定性因素）
+            # 注意：此函数每天被调用5次，必须按日期计数而非调用次数
+            prev_mode = getattr(g, "_confirmed_mode", "unknown")
+            pending = getattr(g, "_pending_mode", None)
+            pending_count = getattr(g, "_pending_count", 0)
+            pending_date = getattr(g, "_pending_date", None)
+            today = context.current_dt.date()
+
+            if raw_mode != prev_mode:
+                if pending == raw_mode:
+                    # 只在新日期增加计数（同一天多次调用不重复计数）
+                    if pending_date != today:
+                        pending_count += 1
+                        g._pending_date = today
+                    # 对于downtrend信号，仅需1天确认（加速防御）
+                    if raw_mode == "trending_downtrend" and pending_count >= 1:
+                        g._confirmed_mode = raw_mode
+                        g._pending_mode = None
+                        g._pending_count = 0
+                        g._pending_date = None
+                        return raw_mode
+                    elif pending_count >= 3:  # 其他模式需3天确认
+                        g._confirmed_mode = raw_mode
+                        g._pending_mode = None
+                        g._pending_count = 0
+                        g._pending_date = None
+                        return raw_mode
+                    else:
+                        g._pending_mode = raw_mode
+                        g._pending_count = pending_count
+                        return prev_mode if prev_mode != "unknown" else raw_mode
+                else:
+                    g._pending_mode = raw_mode
+                    g._pending_count = 0
+                    g._pending_date = today
+                    return prev_mode if prev_mode != "unknown" else raw_mode
+            else:
+                g._pending_mode = None
+                g._pending_count = 0
+                g._pending_date = None
+                return raw_mode
+
+        except Exception as e:
+            log.debug(f"[市场模式检测v2异常] {e}")
+            return MarketDetector.detect_market_mode(context)
+
 
 # ==========================================
 # 7. PositionAgent: MA20跟踪止损 + 三档止盈
@@ -1601,8 +1737,8 @@ class PositionAgent:
     @staticmethod
     def check_intraday_exit(context):
         """双模自适应盘中风控"""
-        # 检测当前市场模式
-        mode = MarketDetector.detect_market_mode(context)
+        # 检测当前市场模式（使用v2版本，基于大盘指数，避免optimization_01的频繁切换问题）
+        mode = MarketDetector.detect_market_mode_v2(context)
         params = ConfigManager.DUAL_MODE_PARAMS.get(
             mode, ConfigManager.DUAL_MODE_PARAMS["sideways"]
         )
@@ -1624,6 +1760,31 @@ class PositionAgent:
                 )
                 if holding_str == today_str:
                     continue
+
+            # ===== 保护机制0: 硬止损（优先级最高，解决2024年"冻死"问题）=====
+            profit_ratio_early, _ = PositionAgent.calc_profit_ratio_safely(pos)
+            if profit_ratio_early is not None:
+                hard_stop = ConfigManager.HARD_STOP
+                # 绝对止损：亏损超过-12%强制卖出
+                if profit_ratio_early < hard_stop["MAX_LOSS"]:
+                    order_target(stock, 0)
+                    log.info(
+                        f"♻️♻️♻️ [硬止损] {stock}, 亏损{profit_ratio_early*100:.2f}% "
+                        f"< {hard_stop['MAX_LOSS']*100:.0f}%"
+                    )
+                    PositionAgent.cleanup_state(stock)
+                    continue
+                # 持仓时间止损：30天内未回本
+                if holding_start:
+                    holding_days = (context.current_dt.date() - holding_start).days if hasattr(holding_start, "days") else (context.current_dt.date() - holding_start).days
+                    if holding_days > hard_stop["TIME_STOP_DAYS"] and profit_ratio_early < hard_stop["TIME_STOP_LOSS"]:
+                        order_target(stock, 0)
+                        log.info(
+                            f"♻️♻️♻️ [时间止损] {stock}, 持仓{holding_days}天, "
+                            f"亏损{profit_ratio_early*100:.2f}%"
+                        )
+                        PositionAgent.cleanup_state(stock)
+                        continue
 
             # 获取K线数据（根据模式选择频率）
             freq = params["STOP_DATA_FREQUENCY"]
@@ -2269,8 +2430,8 @@ def handle_data(context, data):
 
     # 1. 9:35 早盘入场分支
     if h == 9 and m == 35:
-        # 检测市场模式，决定是否启用早盘入场
-        mode = MarketDetector.detect_market_mode(context)
+        # 检测市场模式，决定是否启用早盘入场（使用v2版本）
+        mode = MarketDetector.detect_market_mode_v2(context)
         params = ConfigManager.DUAL_MODE_PARAMS.get(mode, {})
 
         if params.get("MORNING_ENTRY_ENABLED", True):
@@ -2356,8 +2517,8 @@ def after_trading_end(context, data):
     """
     log.info(f"[盘后流程] 开始执行 {context.current_dt.date()}")
 
-    # 市场模式日志
-    mode = MarketDetector.detect_market_mode(context)
+    # 市场模式日志（使用v2版本）
+    mode = MarketDetector.detect_market_mode_v2(context)
     params = ConfigManager.DUAL_MODE_PARAMS.get(mode, {})
     log.info(
         "[市场模式] 当前模式={}, 止盈L1={:.0f}%, 止盈L2={:.0f}%, 日线/15min={}".format(
