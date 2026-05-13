@@ -69,11 +69,14 @@ backtest*.json
 *.png
 !docs/sponsor/*.png
 *.gz
-CLAUDE.md
 GEMINI.md
 .pre-commit-config.yaml
-strategies/*
 data*/
 .claude
 *.ipynb
 research/trends_up_cache.pkl
+strategies/trends_up/optimization/results/
+strategies/trends_up/optimization/optimization_output.log
+strategies/trends_up/stats/
+.gitnexus
+AGENTS.md
