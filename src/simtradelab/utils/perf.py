@@ -8,9 +8,16 @@
 """性能计时工具"""
 
 
+import os
 import time
 from functools import wraps
 from contextlib import contextmanager
+
+
+def _perf_logging_enabled() -> bool:
+    """Allow verbose perf logs to be toggled without touching strategy logic."""
+    value = os.getenv("SIMTRADELAB_ENABLE_PERF_LOGS", "").strip().lower()
+    return value in {"1", "true", "yes", "on"}
 
 
 def format_elapsed_time(elapsed: float) -> str:
@@ -66,7 +73,7 @@ def timer(threshold=0.1, name=None):
             result = func(*args, **kwargs)
             elapsed = time.perf_counter() - start
 
-            if elapsed > threshold:
+            if elapsed > threshold and _perf_logging_enabled():
                 func_name = name or func.__name__
                 if name:
                     from simtradelab.i18n import t as _t
@@ -140,6 +147,6 @@ def timed(name="", threshold=0.1):
         yield
     finally:
         elapsed = time.perf_counter() - start
-        if elapsed >= threshold:
+        if elapsed >= threshold and _perf_logging_enabled():
             from simtradelab.i18n import t as _t
             pass # print(_t("perf.timing", name=name, time="{:.2f}".format(elapsed)), flush=True)

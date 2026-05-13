@@ -317,10 +317,10 @@ class PtradeAPI:
                 and isinstance(stock_df, pd.DataFrame)
                 and isinstance(stock_df.index, pd.DatetimeIndex)
             ):
-                # int64 nanoseconds 作为 dict key，避免 pd.Timestamp 构造开销
-                idx_i8 = stock_df.index.values.view("i8")
-                date_dict = dict(zip(idx_i8.tolist(), range(len(idx_i8))))
-                self._stock_date_index[stock] = (date_dict, idx_i8)
+                # 统一为纳秒精度，兼容 datetime64[us]/[ms] 等不同精度的 parquet 数据
+                idx_ns = stock_df.index.astype("datetime64[ns]").values.view("i8")
+                date_dict = dict(zip(idx_ns.tolist(), range(len(idx_ns))))
+                self._stock_date_index[stock] = (date_dict, idx_ns)
             else:
                 self._stock_date_index[stock] = ({}, np.array([], dtype="i8"))
         return self._stock_date_index[stock]
@@ -569,6 +569,7 @@ class PtradeAPI:
     # 定义字段所属表的映射
     FUNDAMENTAL_TABLES = {
         "valuation": ["pe_ttm", "pb", "ps_ttm", "pcf", "total_value", "float_value"],
+        "capital_structure": ["total_shares", "a_floats"],
         "profit_ability": [
             "roe",
             "roa",
