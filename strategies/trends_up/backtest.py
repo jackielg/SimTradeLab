@@ -25,11 +25,11 @@ class ConfigManager:
 
     # 选股漏斗阈值
     FILTER_CAPITAL = {
-        "MIN_TOTAL_CAPITAL": 50e8,  # 总市值 > 50亿
-        "MAX_TOTAL_CAPITAL": 200e8,  # 总市值 < 200亿
-        "MAX_FLOAT_CAPITAL": 80e8,  # 流通市值 < 80亿
-        "MAX_PRICE": 80.0,  # 股价 < 80元
-        "MIN_TURNOVER": 30e6,  # 最小成交额 3000万
+        "MIN_TOTAL_CAPITAL": 50e8,
+        "MAX_TOTAL_CAPITAL": 200e8,
+        "MAX_FLOAT_CAPITAL": 80e8,
+        "MAX_PRICE": 80.0,
+        "MIN_TURNOVER": 30e6,
     }
 
     # 买入价格限制配置（放宽日内涨幅限制）
