@@ -18,7 +18,7 @@ class ConfigManager:
     """统一管理策略的所有超参数、过滤阈值和功能开关"""
 
     # 基础配置
-    MAX_POSITIONS = 999  # opt08: 去持仓上限(实际受资金约束)
+    MAX_POSITIONS = 5    # opt08: 保持 opt04 最优值(更高会稀释S级集中度)
     MIN_TRADE_AMOUNT = 10000  # opt08: 每笔最低交易额
     BENCHMARK_INDEX = "000300.SS"  # 沪深300作为大盘感知指标
     BUY_TIME = (14, 30)  # 主力买入时间 14:30
@@ -103,8 +103,8 @@ class ConfigManager:
     ATR_CHANDELIER = {
         "ATR_PERIOD": 22,
         "UPTREND_MULTIPLIER": 5.0,     # uptrend: 极宽（不轻易退出趋势）
-        "SIDEWAYS_MULTIPLIER": 2.5,    # sideways: 适中（震荡中增加周转）
-        "DOWNTREND_MULTIPLIER": 1.5,   # downtrend: 紧（快速止损）
+        "SIDEWAYS_MULTIPLIER": 2.5,    # opt08: 震荡市增加周转
+        "DOWNTREND_MULTIPLIER": 1.5,   # opt08: 下跌市快速止损
         "DOWNTREND_ATR_PERIOD": 14,
         "ENTRY_THRESHOLD_UPTREND": 3.0,     # uptrend: 盈利>3xATR才启用
         "ENTRY_THRESHOLD_SIDEWAYS": 0.5,    # sideways: 轻微盈利就启用
