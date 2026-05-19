@@ -25,7 +25,7 @@ class ConfigManager:
 
     # 选股漏斗阈值
     FILTER_CAPITAL = {
-        "MIN_TOTAL_CAPITAL": 50e8,  # 总市值 > 50亿（30→50，排除小盘垃圾股）
+        "MIN_TOTAL_CAPITAL": 50e8,  # 总市值 > 50亿
         "MAX_TOTAL_CAPITAL": 200e8,  # 总市值 < 200亿
         "MAX_FLOAT_CAPITAL": 80e8,  # 流通市值 < 80亿
         "MAX_PRICE": 80.0,  # 股价 < 80元
@@ -135,7 +135,7 @@ class ConfigManager:
             "TAKE_PROFIT_L1": 9.99,
             "TAKE_PROFIT_L2": 9.99,
             "MAX_POSITIONS_DAILY": 6,
-            "MIN_SCORE_B": 0.45,  # 0.20→0.45（提高选股标准）
+            "MIN_SCORE_B": 0.45,
             "MORNING_ENTRY_ENABLED": True,
             "CONFIRM_STOP_BARS": 5,
         },
@@ -145,7 +145,7 @@ class ConfigManager:
             "TAKE_PROFIT_L1": 9.99,
             "TAKE_PROFIT_L2": 9.99,
             "MAX_POSITIONS_DAILY": 6,
-            "MIN_SCORE_B": 0.45,  # 0.20→0.45（提高选股标准）
+            "MIN_SCORE_B": 0.45,
             "MORNING_ENTRY_ENABLED": True,
             "CONFIRM_STOP_BARS": 5,
         },

@@ -588,6 +588,8 @@ class PtradeAPI:
     # 定义字段所属表的映射
     FUNDAMENTAL_TABLES = {
         "valuation": ["pe_ttm", "pb", "ps_ttm", "pcf", "total_value", "float_value"],
+        "fundamentals": ["total_shares", "a_floats", "roe", "net_profit_ratio",
+                         "gross_income_ratio", "netProfit", "epsTTM", "MBRevenue"],
         "profit_ability": [
             "roe",
             "roa",
