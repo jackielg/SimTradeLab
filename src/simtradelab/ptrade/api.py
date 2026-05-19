@@ -779,17 +779,36 @@ class PtradeAPI:
                 stock_data = {}
                 for field in fields:
                     if field == "total_value" and need_realtime_total_value:
-                        col_idx = df.columns.get_loc("total_shares") if "total_shares" in df.columns else -1
-                        total_shares = df.iat[idx, col_idx] if col_idx >= 0 else None
+                        total_shares = None
+                        if "total_shares" in df.columns:
+                            total_shares = df.iat[idx, df.columns.get_loc("total_shares")]
+                        else:
+                            # fallback: fundamentals_dict
+                            fund_df = self.data_context.fundamentals_dict.get(stock) if hasattr(self.data_context, 'fundamentals_dict') and self.data_context.fundamentals_dict else None
+                            if fund_df is not None and not fund_df.empty and "total_shares" in fund_df.columns:
+                                fund_dates = pd.to_datetime(fund_df["publ_date"], errors="coerce")
+                                valid = fund_dates <= query_ts
+                                if valid.any():
+                                    latest_idx = fund_df.index[valid].max()
+                                    total_shares = fund_df.at[latest_idx, "total_shares"]
                         if total_shares is not None and not pd.isna(total_shares) and stock in close_prices:
-                            stock_data[field] = close_prices[stock] * total_shares
+                            stock_data[field] = close_prices[stock] * float(total_shares)
                         elif field in df.columns:
                             stock_data[field] = df[field].values[idx]
                     elif field == "float_value" and need_realtime_float_value:
-                        col_idx = df.columns.get_loc("a_floats") if "a_floats" in df.columns else -1
-                        a_floats = df.iat[idx, col_idx] if col_idx >= 0 else None
+                        a_floats = None
+                        if "a_floats" in df.columns:
+                            a_floats = df.iat[idx, df.columns.get_loc("a_floats")]
+                        else:
+                            fund_df = self.data_context.fundamentals_dict.get(stock) if hasattr(self.data_context, 'fundamentals_dict') and self.data_context.fundamentals_dict else None
+                            if fund_df is not None and not fund_df.empty and "a_floats" in fund_df.columns:
+                                fund_dates = pd.to_datetime(fund_df["publ_date"], errors="coerce")
+                                valid = fund_dates <= query_ts
+                                if valid.any():
+                                    latest_idx = fund_df.index[valid].max()
+                                    a_floats = fund_df.at[latest_idx, "a_floats"]
                         if a_floats is not None and not pd.isna(a_floats) and stock in close_prices:
-                            stock_data[field] = close_prices[stock] * a_floats
+                            stock_data[field] = close_prices[stock] * float(a_floats)
                         elif field in df.columns:
                             stock_data[field] = df[field].values[idx]
                     elif field in df.columns:
