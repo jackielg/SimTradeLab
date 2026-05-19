@@ -7,7 +7,6 @@
 import pickle
 import datetime
 import math
-import os
 import pandas as pd
 import numpy as np
 
@@ -19,7 +18,8 @@ class ConfigManager:
     """统一管理策略的所有超参数、过滤阈值和功能开关"""
 
     # 基础配置
-    MAX_POSITIONS = 5  # 持仓上限
+    MAX_POSITIONS = 999  # opt08: 去持仓上限(实际受资金约束)
+    MIN_TRADE_AMOUNT = 10000  # opt08: 每笔最低交易额
     BENCHMARK_INDEX = "000300.SS"  # 沪深300作为大盘感知指标
     BUY_TIME = (14, 30)  # 主力买入时间 14:30
 
@@ -84,96 +84,6 @@ class ConfigManager:
     # 持仓轮换
     ROTATE_ENABLED = True
     ROTATE_SCORE_THRESHOLD = 1.0
-    FEATURE_FLAGS = {
-        "REPORT_ENHANCED": True,
-        "ROTATION_V2": False,
-        "VERBOSE_DAILY_REPORTS": False,
-        "ENTRY_SCORE_V2": True,      # Phase 1B 默认
-        "EXIT_STAGE_V1": False,      # Phase 3 已暂停
-        "OPTIMIZATION_06_A1": False,  # A1 已测试，无效，已封档
-        "OPTIMIZATION_06_A2": False,  # A2 已测试，无效，已封档
-    }
-
-    # ===== optimization_06 临时配置预设（通过环境变量 OPTIMIZATION_06_PRESET 切换）=====
-    @staticmethod
-    def apply_opt06_preset():
-        preset = os.environ.get("OPTIMIZATION_06_PRESET", "")
-        if preset == "opt04":
-            ConfigManager.FEATURE_FLAGS["ENTRY_SCORE_V2"] = False
-        elif preset == "phase1a":
-            ConfigManager.FEATURE_FLAGS["ENTRY_SCORE_V2"] = True
-            ConfigManager.ENTRY_SCORE_V2["MAX_NEW_B_POSITIONS"] = None
-            ConfigManager.ENTRY_SCORE_V2["MIN_SCORE_B_SIDEWAYS"] = 0.45
-            ConfigManager.ENTRY_SCORE_V2["MIN_SCORE_B_DOWNTREND"] = 0.45
-            ConfigManager.ENTRY_SCORE_V2["ALLOW_2OF4_B_IN_SIDEWAYS"] = True
-            ConfigManager.ENTRY_SCORE_V2["ALLOW_2OF4_B_IN_DOWNTREND"] = True
-            ConfigManager.ENTRY_SCORE_V2["ALLOW_2OF4_B_IN_UPTREND"] = True
-            ConfigManager.ENTRY_SCORE_V2["MIN_CANDIDATE_SCORE_GAP"] = 0.0
-            ConfigManager.ENTRY_SCORE_V2["CANDIDATE_GAP_SKIP_REDUCE"] = 0
-        # phase1b = default, no override needed
-
-    ENTRY_SCORE_V2 = {
-        # Phase 1 子方案 A 保留项
-        "ENABLE_NEGATIVE_PENALTY": True,
-        "ENABLE_RS60": True,
-        "ENABLE_CANDIDATE_PERSISTENCE": False,
-        "RS60_WEIGHT": 0.05,
-        "NEGATIVE_PENALTY_WEIGHT": 0.18,
-        "PERSISTENCE_BONUS_PER_DAY": 0.015,
-        "PERSISTENCE_MAX_BONUS": 0.06,
-        # Phase 1B 新增项：准入分层 + 弱市收缩
-        "MAX_NEW_B_POSITIONS": 2,
-        "MIN_SCORE_B_SIDEWAYS": 0.52,
-        "MIN_SCORE_B_DOWNTREND": 0.60,
-        "ALLOW_2OF4_B_IN_SIDEWAYS": False,
-        "ALLOW_2OF4_B_IN_DOWNTREND": False,
-        "ALLOW_2OF4_B_IN_UPTREND": True,
-        "MIN_CANDIDATE_SCORE_GAP": 0.08,
-        "CANDIDATE_GAP_SKIP_REDUCE": 1,
-    }
-    ROTATION_V2 = {
-        "MIN_HOLD_DAYS": 5,
-        "MAX_ROTATIONS_PER_DAY": 1,
-        "SCORE_DELTA": 12.0,
-        "MIN_OLD_HOLDING_SCORE": 45.0,
-        "REENTRY_COOLDOWN_DAYS": 10,
-        "FEE_BUFFER": 0.005,
-    }
-    EXIT_STAGE_V1 = {
-        "PROTECT_DAYS": 5,
-        "TREND_DAYS": 20,
-        "ATR_PERIOD": 10,
-        "ATR_MULTIPLIER": 1.5,
-        "WEAK_HOLDING_SCORE": 40.0,
-        "DECAY_LOSS_THRESHOLD": -0.03,
-    }
-
-    # optimization_06 A1：非对称暴露增强（仅强趋势+高质量候选时生效）
-    OPTIMIZATION_06_A1 = {
-        "ENABLED": True,                           # A1 暴露增强已启用
-        # 强趋势期暴露增强
-        "UPTREND_POS_RATIO": 0.95,                # 总仓位上限 0.90→0.95
-        "UPTREND_MAX_DAILY_BUYS": 8,              # 日最大开仓 6→8
-        "UPTREND_CASH_RESERVE": 0.05,             # 现金保留 0.10→0.05
-        # S 级集中度增强（仅强趋势 + 充足 S/A 候选时）
-        "S_WEIGHT_BOOST": 0.5,                    # S 级权重额外加成（3.0→3.5）
-        # 机会密度门控（全部满足才启用暴露增强）
-        "MIN_S_CANDIDATES_FOR_BOOST": 2,          # 至少 N 个 S 级候选
-        "MIN_SA_CANDIDATES_FOR_BOOST": 5,         # 至少 N 个 S+A 级候选
-        "MIN_TOP1_SCORE_FOR_BOOST": 0.90,         # top1 entry_score 下限
-        "MIN_FRONT_GAP_FOR_BOOST": 0.06,          # top1-top3 最小分差（候选强分化）
-    }
-
-    # optimization_06 A2：强趋势期候选弹性恢复（A1 失败后的备选路径）
-    OPTIMIZATION_06_A2 = {
-        "ENABLED": True,                           # A2 候选弹性恢复
-        # 强趋势期临时放宽的准入参数
-        "UPTREND_NEGATIVE_PENALTY_WEIGHT": 0.06,  # 负向惩罚 0.18→0.06（允许更激进的标的）
-        "UPTREND_MAX_NEW_B_POSITIONS": 4,         # B级上限 2→4
-        "UPTREND_MIN_SCORE_B": 0.45,              # B级最低分放宽
-        "UPTREND_ALLOW_2OF4_B": True,             # 允许 2/4 B 级
-        # 门控复用 A1 的 gate check（同一组条件）
-    }
 
     # 市值估算配置（降级场景使用）
     CAPITAL_ESTIMATION = {
@@ -187,6 +97,20 @@ class ConfigManager:
         "MAX_DRAWDOWN_FROM_PEAK": 0.20,  # 峰值回撤>20%强制卖出
         "PROFIT_LOCK_THRESHOLD": 0.03,  # 盈利>3%后启用成本价锁定
         "PROFIT_LOCK_RATIO": 0.50,  # 锁定50%浮盈（保本+2%）
+    }
+
+    # optimization_08: ATR吊灯止损（资本周转增强）
+    ATR_CHANDELIER = {
+        "ATR_PERIOD": 22,
+        "UPTREND_MULTIPLIER": 5.0,     # uptrend: 极宽（不轻易退出趋势）
+        "SIDEWAYS_MULTIPLIER": 2.5,    # sideways: 适中（震荡中增加周转）
+        "DOWNTREND_MULTIPLIER": 1.5,   # downtrend: 紧（快速止损）
+        "DOWNTREND_ATR_PERIOD": 14,
+        "ENTRY_THRESHOLD_UPTREND": 3.0,     # uptrend: 盈利>3xATR才启用
+        "ENTRY_THRESHOLD_SIDEWAYS": 0.5,    # sideways: 轻微盈利就启用
+        "ENTRY_THRESHOLD_DOWNTREND": 0.0,   # downtrend: 立即启用
+        "PROFIT_LOCK_15PCT": {"min_profit": 0.15, "floor": 1.03},
+        "PROFIT_LOCK_30PCT": {"min_profit": 0.30, "floor": 1.10},
     }
 
     # 硬止损参数（解决2024年"冻死"问题）
@@ -284,34 +208,6 @@ class Common:
                     f.write(content)
             except Exception:
                 pass
-
-    @staticmethod
-    def safe_append_file(filename, content, header=None, encoding="utf-8"):
-        candidate_paths = [Common.get_log_path(filename), filename]
-        for path in candidate_paths:
-            try:
-                exists = os.path.exists(path)
-                file_size = os.path.getsize(path) if exists else 0
-                if isinstance(content, bytes):
-                    mode = "ab"
-                    with open(path, mode) as f:
-                        if file_size == 0 and header:
-                            header_bytes = (
-                                header
-                                if isinstance(header, bytes)
-                                else str(header).encode(encoding)
-                            )
-                            f.write(header_bytes)
-                        f.write(content)
-                else:
-                    mode = "a"
-                    with open(path, mode, encoding=encoding) as f:
-                        if file_size == 0 and header:
-                            f.write(header)
-                        f.write(content)
-                return
-            except Exception:
-                continue
 
     @staticmethod
     def get_display_width(s):
@@ -652,8 +548,13 @@ class SelectionAgent:
     @staticmethod
     def build_watchlist(context):
         """构建观察池：执行 Step 1~6 选股漏斗，结果保存在 g.long_term_candidates"""
+        today = context.current_dt.strftime("%Y-%m-%d")
+        if getattr(g, "_watchlist_built_date", "") == today:
+            return
+        g._watchlist_built_date = today
+
         log.info("")
-        log.info("═" * 80)
+        log.info("=" * 80)
         log.info("📊 选股漏斗 %s" % context.current_dt.strftime("%Y-%m-%d %H:%M"))
         log.info("═" * 80)
 
@@ -1117,103 +1018,6 @@ class SelectionAgent:
         return total_score
 
     @staticmethod
-    def compute_entry_features(_stock, df, index_df=None):
-        close = float(df["close"].iloc[-1])
-        ma5 = float(df["close"].rolling(5).mean().iloc[-1]) if len(df) >= 5 else close
-        ma20 = float(df["close"].rolling(20).mean().iloc[-1]) if len(df) >= 20 else close
-        high_10 = float(df["high"].iloc[-10:].max()) if len(df) >= 10 else close
-        low_10 = float(df["low"].iloc[-10:].min()) if len(df) >= 10 else close
-        stock_ret_60 = close / float(df["close"].iloc[-60]) - 1 if len(df) >= 60 else 0.0
-        index_ret_60 = 0.0
-        if index_df is not None and not index_df.empty and len(index_df) >= 60:
-            index_ret_60 = (
-                float(index_df["close"].iloc[-1]) / float(index_df["close"].iloc[-60]) - 1
-            )
-
-        return {
-            "rs60_excess": stock_ret_60 - index_ret_60,
-            "pullback_from_high": (high_10 - close) / high_10 if high_10 > 0 else 0.0,
-            "distance_above_ma5": (close - ma5) / ma5 if ma5 > 0 else 0.0,
-            "distance_above_ma20": (close - ma20) / ma20 if ma20 > 0 else 0.0,
-            "range_compression": (high_10 - low_10) / close if close > 0 else 0.0,
-            "close_above_ma20": close > ma20,
-        }
-
-    @staticmethod
-    def score_entry_v2(_context, stock, base_score, features):
-        cfg = ConfigManager.ENTRY_SCORE_V2
-        adjustment = 0.0
-        detail = {
-            "base_score": round(base_score, 4),
-            "rs60_excess": round(features.get("rs60_excess", 0.0), 4),
-            "negative_penalty": 0.0,
-            "persistence_bonus": 0.0,
-        }
-
-        if cfg.get("ENABLE_RS60", False):
-            rs_adjustment = max(
-                -0.08,
-                min(
-                    0.12,
-                    features.get("rs60_excess", 0.0) * cfg.get("RS60_WEIGHT", 0.12) * 5,
-                ),
-            )
-            adjustment += rs_adjustment
-
-        if cfg.get("ENABLE_NEGATIVE_PENALTY", False):
-            # A2 弹性恢复：强趋势期降低负向惩罚权重
-            a2_active = getattr(g, "_a2_active", False)
-            neg_weight = (
-                ConfigManager.OPTIMIZATION_06_A2.get(
-                    "UPTREND_NEGATIVE_PENALTY_WEIGHT", 0.06
-                )
-                if a2_active
-                else cfg.get("NEGATIVE_PENALTY_WEIGHT", 0.10)
-            )
-            penalty = 0.0
-            penalty += max(0.0, features.get("pullback_from_high", 0.0) - 0.025) * neg_weight
-            penalty += max(0.0, features.get("distance_above_ma5", 0.0) - 0.06) * neg_weight
-            penalty += max(0.0, features.get("distance_above_ma20", 0.0) - 0.12) * (neg_weight * 1.2)
-            if not features.get("close_above_ma20", True):
-                penalty += 0.05
-            detail["negative_penalty"] = round(penalty, 4)
-            adjustment -= penalty
-
-        if cfg.get("ENABLE_CANDIDATE_PERSISTENCE", False):
-            history = getattr(g, "_entry_candidate_streaks", {})
-            streak = history.get(stock, 0)
-            bonus = min(
-                streak * cfg.get("PERSISTENCE_BONUS_PER_DAY", 0.015),
-                cfg.get("PERSISTENCE_MAX_BONUS", 0.06),
-            )
-            detail["persistence_bonus"] = round(bonus, 4)
-            adjustment += bonus
-
-        return base_score + adjustment, detail
-
-    @staticmethod
-    def _get_b_min_score_for_mode(mode, default_min):
-        """Phase 1B：按市场模式返回 B 级最低准入分（base_score 尺度）"""
-        cfg = ConfigManager.ENTRY_SCORE_V2
-        if mode == "sideways":
-            return cfg.get("MIN_SCORE_B_SIDEWAYS", default_min)
-        elif mode == "trending_downtrend":
-            return cfg.get("MIN_SCORE_B_DOWNTREND", default_min)
-        return default_min
-
-    @staticmethod
-    def _allow_2of4_for_mode(mode, default_allow):
-        """Phase 1B：按市场模式决定是否允许 2/4 → B 路径"""
-        cfg = ConfigManager.ENTRY_SCORE_V2
-        if mode == "sideways":
-            return cfg.get("ALLOW_2OF4_B_IN_SIDEWAYS", default_allow)
-        elif mode == "trending_downtrend":
-            return cfg.get("ALLOW_2OF4_B_IN_DOWNTREND", default_allow)
-        elif mode == "trending_uptrend":
-            return cfg.get("ALLOW_2OF4_B_IN_UPTREND", default_allow)
-        return default_allow
-
-    @staticmethod
     def select(context, stock_list, available_slots=3):
         """
         选股：识别高置信度启动形态，支持分级准入（S/A/B三级）
@@ -1236,52 +1040,14 @@ class SelectionAgent:
         log.info("─" * 80)
         log.info("🎯 选股参数")
         log.info("─" * 80)
-        # A2 激进版：强趋势期完全禁用 ENTRY_SCORE_V2，恢复 opt04 选股逻辑
-        a2_active = (
-            ConfigManager.FEATURE_FLAGS.get("OPTIMIZATION_06_A2", False)
-            and ConfigManager.OPTIMIZATION_06_A2.get("ENABLED", False)
-            and mode == "trending_uptrend"
-        )
-        if a2_active:
-            entry_score_v2_enabled = False  # 激进：完全回退到 opt04 评分
-        if a2_active:
-            g._a2_active = True
-            a2_cfg = ConfigManager.OPTIMIZATION_06_A2
-            # 激进：完全回退到 opt04 准入参数
-            min_score_b_dynamic = 0.45
-            allow_2_of_4 = True
-            log.info(
-                "  [A2弹性恢复] 负向惩罚%.2f B级上限%d B级最低分%.2f 2/4B=是"
-                % (
-                    a2_cfg.get("UPTREND_NEGATIVE_PENALTY_WEIGHT", 0.06),
-                    a2_cfg.get("UPTREND_MAX_NEW_B_POSITIONS", 4),
-                    min_score_b_dynamic,
-                )
-            )
-        else:
-            g._a2_active = False
-
         log.info("  市场模式: %s | MIN_SCORE_B: %.2f | MAX_DAILY: %d" % (mode, min_score_b_dynamic, max_positions_daily))
         log.info("  ALLOW_2_OF_4: %s | ALLOW_3_OF_4: %s" % (allow_2_of_4, allow_3_of_4))
 
-        # 预加载沪深300数据用于相对强度过滤和 Entry Score V2 排序增强
+        # 预加载沪深300数据用于相对强度过滤
         df_index = None
-        entry_score_v2_enabled = ConfigManager.FEATURE_FLAGS.get("ENTRY_SCORE_V2", False)
-        need_index_data = (
-            ConfigManager.BREAKOUT.get("RELATIVE_STRENGTH", False)
-            or (
-                entry_score_v2_enabled
-                and ConfigManager.ENTRY_SCORE_V2.get("ENABLE_RS60", False)
-            )
-        )
-        if need_index_data:
-            df_index = DataCache.get_daily_data(ConfigManager.BENCHMARK_INDEX, 65)
-            if (
-                ConfigManager.BREAKOUT.get("RELATIVE_STRENGTH", False)
-                and df_index is not None
-                and not df_index.empty
-                and len(df_index) >= 20
-            ):
+        if ConfigManager.BREAKOUT.get("RELATIVE_STRENGTH", False):
+            df_index = DataCache.get_daily_data(ConfigManager.BENCHMARK_INDEX, 25)
+            if df_index is not None and not df_index.empty and len(df_index) >= 20:
                 index_return_20d = (
                     df_index["close"].iloc[-1] / df_index["close"].iloc[-20] - 1
                 )
@@ -1413,127 +1179,30 @@ class SelectionAgent:
                 base_score = SelectionAgent.score_breakout_stock(
                     stock, df, volume_score, macd_score, ma_values
                 )
-                # Phase 1B：弱市中 B 级最低准入分上调
-                min_b_threshold = SelectionAgent._get_b_min_score_for_mode(mode, min_score_b_dynamic)
-                if base_score > min_b_threshold:
+                if base_score > min_score_b_dynamic:
                     grade = "B"
                     final_score = base_score
 
-            elif met_count == 2 and SelectionAgent._allow_2of4_for_mode(mode, allow_2_of_4):
-                # 2/4条件通过 → B级（Phase 1B：弱市中关闭此路径）
+            elif met_count == 2 and allow_2_of_4:
+                # 2/4条件通过 → B级
                 base_score = SelectionAgent.score_breakout_stock(
                     stock, df, volume_score, macd_score, ma_values
                 )
-                min_b_threshold = SelectionAgent._get_b_min_score_for_mode(mode, min_score_b_dynamic)
-                if base_score > (min_b_threshold - 0.05):
+                if base_score > (min_score_b_dynamic - 0.05):
                     grade = "B"
                     final_score = base_score
 
             if grade in ["S", "A", "B"]:
-                features = SelectionAgent.compute_entry_features(stock, df, df_index)
-                entry_score = final_score
-                entry_detail = {
-                    "base_score": round(final_score, 4),
-                    "entry_score_v2": round(final_score, 4),
-                    "met_count": met_count,
-                }
-                if entry_score_v2_enabled:
-                    entry_score, entry_detail = SelectionAgent.score_entry_v2(
-                        context, stock, final_score, features
-                    )
-                    entry_detail["entry_score_v2"] = round(entry_score, 4)
-
-                scored_stocks.append(
-                    {
-                        "stock": stock,
-                        "base_score": final_score,
-                        "entry_score": entry_score,
-                        "grade": grade,
-                        "features": features,
-                        "entry_detail": entry_detail,
-                    }
-                )
+                scored_stocks.append((stock, final_score, grade))
 
         # 按得分降序排列，返回 Top N 个结果
-        scored_stocks.sort(
-            key=lambda item: (item["entry_score"], item["base_score"]),
-            reverse=True,
-        )
+        scored_stocks.sort(key=lambda x: x[1], reverse=True)
         top_n = min(
             max(available_slots * 2, ConfigManager.SCORING_TOP_K_MIN),
             max_positions_daily,
         )
-        selected_rows = scored_stocks[:top_n]
 
-        # Phase 1B：候选质量差距约束——前排差距不足时减少买入
-        quality_gap_triggered = False
-        gap_skip_count = 0
-        if len(selected_rows) >= 2 and len(scored_stocks) >= 2:
-            top1_score = selected_rows[0]["entry_score"]
-            last_selected_score = selected_rows[-1]["entry_score"]
-            min_gap = ConfigManager.ENTRY_SCORE_V2.get("MIN_CANDIDATE_SCORE_GAP", 0.08)
-            if (top1_score - last_selected_score) < min_gap:
-                quality_gap_triggered = True
-                gap_skip_count = ConfigManager.ENTRY_SCORE_V2.get("CANDIDATE_GAP_SKIP_REDUCE", 1)
-                reduce_by = min(gap_skip_count, len(selected_rows) - 1)
-                if reduce_by > 0:
-                    selected_rows = selected_rows[: len(selected_rows) - reduce_by]
-
-        selected = [
-            (item["stock"], item["entry_score"], item["grade"])
-            for item in selected_rows
-        ]
-
-        today_str = context.current_dt.strftime("%Y-%m-%d")
-        if getattr(g, "_entry_candidate_streaks_date", "") != today_str:
-            today_candidates = {item["stock"] for item in scored_stocks}
-            previous_streaks = getattr(g, "_entry_candidate_streaks", {})
-            g._entry_candidate_streaks = {
-                stock: previous_streaks.get(stock, 0) + 1
-                for stock in today_candidates
-            }
-            g._entry_candidate_streaks_date = today_str
-
-        if ConfigManager.FEATURE_FLAGS.get("REPORT_ENHANCED", False):
-            if not hasattr(g, "_candidate_quality_history"):
-                g._candidate_quality_history = []
-            # Phase 1B 观测：按准入路径统计 B 级来源
-            b_by_2of4 = sum(
-                1 for item in scored_stocks
-                if item["grade"] == "B"
-                and item.get("entry_detail", {}).get("met_count", 0) == 2
-            )
-            b_by_3of4 = sum(
-                1 for item in scored_stocks
-                if item["grade"] == "B"
-                and item.get("entry_detail", {}).get("met_count", 0) == 3
-            )
-            snapshot = {
-                "date": today_str,
-                "mode": mode,
-                "candidate_count": len(scored_stocks),
-                "selected_count": len(selected),
-                "s_count": sum(1 for item in scored_stocks if item["grade"] == "S"),
-                "a_count": sum(1 for item in scored_stocks if item["grade"] == "A"),
-                "b_count": sum(1 for item in scored_stocks if item["grade"] == "B"),
-                "b_by_2of4": b_by_2of4,
-                "b_by_3of4": b_by_3of4,
-                "top1_score": selected_rows[0]["entry_score"] if len(selected_rows) >= 1 else 0.0,
-                "top2_score": selected_rows[1]["entry_score"] if len(selected_rows) >= 2 else 0.0,
-                "top3_score": selected_rows[2]["entry_score"] if len(selected_rows) >= 3 else 0.0,
-                "top1_base_score": selected_rows[0]["base_score"] if len(selected_rows) >= 1 else 0.0,
-                "top2_base_score": selected_rows[1]["base_score"] if len(selected_rows) >= 2 else 0.0,
-                "top3_base_score": selected_rows[2]["base_score"] if len(selected_rows) >= 3 else 0.0,
-                "quality_gap_triggered": int(quality_gap_triggered),
-                "quality_gap_skip": gap_skip_count if quality_gap_triggered else 0,
-                "selected_symbols": "|".join(item["stock"] for item in selected_rows[:5]),
-            }
-            g._candidate_quality_history = [
-                item for item in g._candidate_quality_history if item.get("date") != today_str
-            ]
-            g._candidate_quality_history.append(snapshot)
-
-        return selected
+        return scored_stocks[:top_n]
 
     @staticmethod
     def detect_morning_gap_up(context):
@@ -1615,11 +1284,6 @@ class ExecutionAgent:
     @staticmethod
     def find_weakest_position(context):
         """查找当前持仓中收益最低的股票"""
-        ranked = ExecutionAgent.rank_positions_for_rotation(context)
-        if ranked:
-            weakest = ranked[0]
-            return weakest["stock"], weakest["profit_ratio"]
-
         weakest_stock = None
         lowest_profit = float("inf")
 
@@ -1646,99 +1310,6 @@ class ExecutionAgent:
             return (None, None)
 
     @staticmethod
-    def _get_position_market_value(pos):
-        try:
-            if hasattr(pos, "market_value") and pos.market_value > 0:
-                return float(pos.market_value)
-            current_price = (
-                float(pos.last_sale_price)
-                if hasattr(pos, "last_sale_price") and pos.last_sale_price > 0
-                else (
-                    float(pos.price)
-                    if hasattr(pos, "price") and pos.price > 0
-                    else 0.0
-                )
-            )
-            return current_price * float(pos.amount)
-        except Exception:
-            return 0.0
-
-    @staticmethod
-    def _is_reentry_cooldown_active(context, stock):
-        cooldown = getattr(g, "_sold_stock_cooldown", {})
-        sold_date = cooldown.get(stock)
-        if not sold_date:
-            return False
-        try:
-            days = (context.current_dt.date() - sold_date).days
-        except Exception:
-            return False
-        return days < ConfigManager.ROTATION_V2.get("REENTRY_COOLDOWN_DAYS", 10)
-
-    @staticmethod
-    def rank_positions_for_rotation(context):
-        ranked = []
-        for stock, pos in context.portfolio.positions.items():
-            if pos.amount <= 0:
-                continue
-
-            profit_ratio, _ = PositionAgent.calc_profit_ratio_safely(pos)
-            if profit_ratio is None:
-                continue
-
-            holding_score, details = PositionAgent.compute_holding_score(
-                context, stock, pos
-            )
-            holding_days = PositionAgent.get_holding_days(context, stock)
-            ranked.append(
-                {
-                    "stock": stock,
-                    "profit_ratio": profit_ratio,
-                    "holding_score": holding_score,
-                    "holding_days": holding_days,
-                    "details": details,
-                    "market_value": ExecutionAgent._get_position_market_value(pos),
-                }
-            )
-
-        ranked.sort(key=lambda item: (item["holding_score"], item["profit_ratio"]))
-        return ranked
-
-    @staticmethod
-    def _check_a1_exposure_boost(mode, target_stocks):
-        """A1 暴露增强门控：市场模式 + 候选质量 + 机会密度三重确认"""
-        if not ConfigManager.FEATURE_FLAGS.get("OPTIMIZATION_06_A1", False):
-            return False
-        cfg = ConfigManager.OPTIMIZATION_06_A1
-        if not cfg.get("ENABLED", False):
-            return False
-        # 门控1：仅 trending_uptrend
-        if mode != "trending_uptrend":
-            return False
-        # 门控2：从候选质量快照读取全量 S/A 计数
-        quality_history = getattr(g, "_candidate_quality_history", [])
-        if not quality_history:
-            return False
-        latest = quality_history[-1]
-        s_count = latest.get("s_count", 0)
-        sa_count = latest.get("s_count", 0) + latest.get("a_count", 0)
-        if s_count < cfg.get("MIN_S_CANDIDATES_FOR_BOOST", 2):
-            return False
-        if sa_count < cfg.get("MIN_SA_CANDIDATES_FOR_BOOST", 5):
-            return False
-        # 门控3：top1 分数足够高
-        if not target_stocks:
-            return False
-        top1_score = target_stocks[0][1]
-        if top1_score < cfg.get("MIN_TOP1_SCORE_FOR_BOOST", 0.90):
-            return False
-        # 门控4：前排分差足够大（候选强分化）
-        if len(target_stocks) >= 3:
-            front_gap = target_stocks[0][1] - target_stocks[2][1]
-            if front_gap < cfg.get("MIN_FRONT_GAP_FOR_BOOST", 0.06):
-                return False
-        return True
-
     def buy_new(context, target_stocks):
         """买入执行：双模自适应仓位分配"""
         current_positions = [
@@ -1768,29 +1339,12 @@ class ExecutionAgent:
             if mode == "trending_uptrend"
             else (0.80 if mode == "sideways" else 0.30)
         )  # sideways 80%（迭代4最优配置：2024年-0.97%，2025年+62.24%）
-
-        # A1 暴露增强：强趋势+高机会密度时提高暴露
-        a1_boost = ExecutionAgent._check_a1_exposure_boost(mode, target_stocks)
-        if a1_boost:
-            a1_cfg = ConfigManager.OPTIMIZATION_06_A1
-            max_pos_ratio = a1_cfg.get("UPTREND_POS_RATIO", 0.95)
-            max_daily_buys = a1_cfg.get("UPTREND_MAX_DAILY_BUYS", 8)
-            log.info(
-                "[A1暴露增强] 总仓位%.0f%% 日开仓上限%d只 (S候选:%d)"
-                % (
-                    max_pos_ratio * 100,
-                    max_daily_buys,
-                    sum(1 for _, _, g in target_stocks if g == "S"),
-                )
-            )
-
         target_total_value = context.portfolio.portfolio_value * max_pos_ratio
         current_pos_value = context.portfolio.positions_value
         allowable_cash = max(0, target_total_value - current_pos_value)
 
-        # 现金保留线（A1 增强时降低）
-        cash_reserve_ratio = 0.05 if a1_boost else 0.10
-        cash_reserve = context.portfolio.portfolio_value * cash_reserve_ratio
+        # 新增: 现金保留线（始终保留10%现金）
+        cash_reserve = context.portfolio.portfolio_value * 0.10
         actual_cash_to_use = min(cash - cash_reserve, allowable_cash)
 
         if actual_cash_to_use <= 10000:
@@ -1798,62 +1352,27 @@ class ExecutionAgent:
             return
 
         if effective_slots > 0:
-            # Phase 1B：B 级持仓数量上限检查
-            # A2 激进版：强趋势期完全解除 B 级上限
-            a2_active = getattr(g, "_a2_active", False)
-            max_b_positions = (
-                None  # 完全解除 B 级限制，模拟 opt04
-                if a2_active
-                else ConfigManager.ENTRY_SCORE_V2.get("MAX_NEW_B_POSITIONS", None)
-            )
-            # 清理已卖出持仓的 grade 记录
-            if hasattr(g, "_holding_grades"):
-                for s in list(g._holding_grades.keys()):
-                    if s not in current_positions:
-                        del g._holding_grades[s]
-            current_b_count = sum(
-                1 for s, pos in context.portfolio.positions.items()
-                if pos.amount > 0 and getattr(g, "_holding_grades", {}).get(s, "") == "B"
-            )
-
-            buy_targets = []
-            for s, score, grade in target_stocks:
-                if s in current_positions:
-                    continue
-                if ExecutionAgent._is_reentry_cooldown_active(context, s):
-                    continue
-                if grade not in ("S", "A", "B"):
-                    continue
-                # Phase 1B：B 级上限控制
-                if grade == "B" and max_b_positions is not None:
-                    if current_b_count >= max_b_positions:
-                        log.info(
-                            f"[B级上限] {s} 跳过, 当前B级持仓 {current_b_count} ≥ {max_b_positions}"
-                        )
-                        continue
-                buy_targets.append((s, score, grade))
-                if grade == "B" and max_b_positions is not None:
-                    current_b_count += 1  # 预占，确保同批不会超额
-                if len(buy_targets) >= effective_slots:
-                    break
+            buy_targets = [
+                (s, score, grade)
+                for s, score, grade in target_stocks
+                if s not in current_positions
+                and grade in ("S", "A", "B")  # S级+A级+B级
+            ][
+                :effective_slots
+            ]
 
             if not buy_targets:
                 log.info("🛡️🛡️🛡️ 无新的可买标的（全部已在持仓中或达到每日上限）。")
                 return
 
-            # 根据级别分配资金比例（A1 增强时 S 级权重加成）
-            s_weight = (
-                3.0 + ConfigManager.OPTIMIZATION_06_A1.get("S_WEIGHT_BOOST", 0)
-                if a1_boost
-                else 3.0
-            )
+            # 根据级别分配资金比例
             total_weight = sum(
-                (s_weight if grade == "S" else 1.0)
+                (3.0 if grade == "S" else 1.0)  # S级高权重
                 for _, _, grade in buy_targets
             )
 
             for stock, score, grade in buy_targets:
-                weight = s_weight if grade == "S" else 1.0
+                weight = 3.0 if grade == "S" else 1.0  # S级高权重
                 cash_per_stock = actual_cash_to_use * (weight / total_weight)
 
                 # 日内涨幅过滤（使用放宽后的配置）
@@ -1884,9 +1403,6 @@ class ExecutionAgent:
                 if not hasattr(g, "_holding_start_date"):
                     g._holding_start_date = {}
                 g._holding_start_date[stock] = context.current_dt.date()
-                if not hasattr(g, "_holding_grades"):
-                    g._holding_grades = {}
-                g._holding_grades[stock] = grade
 
                 df_buy = DataCache.get_daily_data(stock, 2)
                 buy_price = (
@@ -1898,103 +1414,46 @@ class ExecutionAgent:
                 g._peak_prices[stock] = buy_price
 
         elif available_slots == 0 and ConfigManager.ROTATE_ENABLED:
-            next_candidate = None
-            for stock, score, grade in target_stocks:
-                if stock in current_positions:
-                    continue
-                if ExecutionAgent._is_reentry_cooldown_active(context, stock):
-                    continue
-                next_candidate = (stock, score, grade)
-                break
+            weakest_stock, weakest_profit = ExecutionAgent.find_weakest_position(
+                context
+            )
 
-            ranked_positions = ExecutionAgent.rank_positions_for_rotation(context)
-            if not ranked_positions or next_candidate is None:
+            if weakest_stock is None or len(target_stocks) == 0:
                 log.info("🛡️🛡️🛡️ 无法执行轮换（无可替换持仓或无新标的）。")
                 return
 
-            weakest = ranked_positions[0]
-            weakest_stock = weakest["stock"]
-            weakest_profit = weakest["profit_ratio"]
-            weakest_score = weakest["holding_score"]
-            weakest_days = weakest["holding_days"]
-            weakest_value = weakest["market_value"]
-            weakness_details = weakest["details"]
-            new_stock, new_score, new_grade = next_candidate
+            new_stock, new_score, new_grade = target_stocks[0]
 
-            old_should_rotate = False
+            should_rotate = False
             if weakest_profit < -0.05 and new_grade in ["S", "A", "B"]:
-                old_should_rotate = True
+                should_rotate = True
             elif weakest_profit < -0.03 and new_grade in ["S", "A"]:
-                old_should_rotate = True
-
-            rotation_cfg = ConfigManager.ROTATION_V2
-            max_rotations_per_day = rotation_cfg.get("MAX_ROTATIONS_PER_DAY", 1)
-            daily_rotations = getattr(g, "_daily_rotation_count", 0)
-            rotation_allowed_today = daily_rotations < max_rotations_per_day
-            new_score_100 = float(new_score) * 100.0
-            score_delta = new_score_100 - weakest_score
-            weak_condition = (
-                weakness_details.get("below_ma20", False)
-                or weakness_details.get("below_ma60", False)
-                or weakness_details.get("rs20_excess", 0.0) < 0
-                or weakness_details.get("drawdown_from_peak", 0.0) > 0.08
-                or weakest_profit < -0.02
-            )
-            score_should_rotate = (
-                weakest_days >= rotation_cfg.get("MIN_HOLD_DAYS", 2)
-                and weakest_score <= rotation_cfg.get("MIN_OLD_HOLDING_SCORE", 45.0)
-                and score_delta >= rotation_cfg.get("SCORE_DELTA", 5.0)
-                and weak_condition
-            )
-
-            use_rotation_v2 = ConfigManager.FEATURE_FLAGS.get("ROTATION_V2", False)
-            should_rotate = (
-                rotation_allowed_today
-                and (old_should_rotate or (use_rotation_v2 and score_should_rotate))
-            )
+                should_rotate = True
 
             log.info(
-                f"{'♻️♻️♻️' if should_rotate else '🛡️🛡️🛡️'} [轮换评估] 最弱持仓: {weakest_stock} "
-                f"收益{weakest_profit:.2%} 评分{weakest_score:.1f} 持有{weakest_days}天 "
+                f"{'♻️♻️♻️' if should_rotate else '🛡️🛡️🛡️'} [轮换评估] 最弱持仓: {weakest_stock} 收益{weakest_profit:.2%} "
                 f"vs 新标的: {new_stock}[{new_grade}级] 得分{new_score:.3f} "
-                f"Δ={score_delta:.1f} {'-> 触发替换' if should_rotate else '-> 不替换'}"
+                f"{'-> 触发替换' if should_rotate else '-> 不替换'}"
             )
 
             if should_rotate:
-                fee_buffer = rotation_cfg.get("FEE_BUFFER", 0.005)
-                cash_per_stock = max(
-                    actual_cash_to_use,
-                    weakest_value * (1 - fee_buffer),
-                )
+                if not hasattr(g, "_rotation_cooldown"):
+                    g._rotation_cooldown = {}
+                if weakest_stock in g._rotation_cooldown:
+                    log.info(f"🛡️🛡️🛡️ [轮换冷却] {weakest_stock} 在冷却期内，跳过轮换")
+                    return
 
-                PositionAgent.record_sell_reason(
-                    context,
-                    weakest_stock,
-                    "rotation",
-                    weakest_profit,
-                    {
-                        "new_stock": new_stock,
-                        "old_holding_score": round(weakest_score, 2),
-                        "new_entry_score": round(new_score_100, 2),
-                        "score_delta": round(score_delta, 2),
-                    },
-                )
+                cash_per_stock = actual_cash_to_use / 1
+
                 order_target(weakest_stock, 0)
-                log.info(
-                    f"♻️♻️♻️ [轮换] 卖出 {weakest_stock} (收益{weakest_profit*100:.2f}%, "
-                    f"评分{weakest_score:.1f})"
-                )
+                log.info(f"♻️♻️♻️ [轮换] 卖出 {weakest_stock} (收益{weakest_profit*100:.2f}%)")
 
                 g._peak_prices.pop(weakest_stock, None)
                 g._buy_prices.pop(weakest_stock, None)
-                if not hasattr(g, "_sold_stock_cooldown"):
-                    g._sold_stock_cooldown = {}
-                g._sold_stock_cooldown[weakest_stock] = context.current_dt.date()
 
                 order_value(new_stock, cash_per_stock)
                 log.info(
-                    f"🚀🚀🚀 [轮换] 买入 {new_stock}[{new_grade}级] "
-                    f"(得分{new_score:.3f}, 金额: {cash_per_stock:.0f})"
+                    f"🚀🚀🚀 [轮换] 买入 {new_stock}[{new_grade}级] (得分{new_score:.3f}), 金额: {cash_per_stock:.0f}"
                 )
 
                 if not hasattr(g, "_holding_start_date"):
@@ -2009,28 +1468,12 @@ class ExecutionAgent:
                 )
                 g._buy_prices[new_stock] = buy_price
                 g._peak_prices[new_stock] = buy_price
-                g._daily_rotation_count = daily_rotations + 1
 
-                if ConfigManager.FEATURE_FLAGS.get("REPORT_ENHANCED", False):
-                    if not hasattr(g, "_rotation_events"):
-                        g._rotation_events = []
-                    g._rotation_events.append(
-                        {
-                            "date": context.current_dt.strftime("%Y-%m-%d"),
-                            "time": context.current_dt.strftime("%H:%M:%S"),
-                            "old_stock": weakest_stock,
-                            "new_stock": new_stock,
-                            "old_profit_ratio": weakest_profit,
-                            "old_holding_score": weakest_score,
-                            "new_entry_score": new_score_100,
-                            "score_delta": score_delta,
-                            "holding_days": weakest_days,
-                        }
-                    )
+                g._rotation_cooldown[weakest_stock] = context.current_dt.date()
             else:
                 log.info(
-                    f"🛡️🛡️🛡️ [轮换] 条件不满足（最弱持仓收益{weakest_profit*100:.2f}% "
-                    f"评分{weakest_score:.1f}，新标的{new_grade}级 Δ={score_delta:.1f}），维持原持仓"
+                    f"🛡️🛡️🛡️ [轮换] 条件不满足（最弱持仓收益{weakest_profit*100:.2f}%，"
+                    f"新标的{new_grade}级），维持原持仓"
                 )
         else:
             log.info("🛡️🛡️🛡️ 已达到最大持仓上限且轮换未启用，放弃买入。")
@@ -2176,6 +1619,8 @@ class MarketDetector:
                 raw_mode = "trending_uptrend"
             elif ma20 < ma60 and recent_5d_return < -0.02:  # -0.03→-0.02（更敏感）
                 raw_mode = "trending_downtrend"
+            elif ma20 < ma60 and recent_5d_return < -0.03:  # 新增: -5%>-3%之间的也视为downtrend
+                raw_mode = "trending_downtrend"
             elif ma20 < ma60:
                 # 新增: 从近期峰值大幅回撤（>7%）视为隐含downtrend（补充MA判断的滞后性）
                 recent_peak = df_index["close"].rolling(20).max().iloc[-1]
@@ -2239,6 +1684,37 @@ class MarketDetector:
 # ==========================================
 class PositionAgent:
     """盘中风控与MA20跟踪止损"""
+
+    @staticmethod
+    def compute_atr(df, period):
+        if df is None or df.empty or len(df) < period + 1:
+            return None
+        try:
+            high = df["high"]
+            low = df["low"]
+            prev_close = df["close"].shift(1)
+            tr = pd.concat(
+                [(high - low), (high - prev_close).abs(), (low - prev_close).abs()],
+                axis=1,
+            ).max(axis=1)
+            atr = tr.rolling(period).mean().iloc[-1]
+            if pd.isna(atr) or atr <= 0:
+                return None
+            return float(atr)
+        except Exception:
+            return None
+
+    @staticmethod
+    def compute_atr_cached(stock, df, period):
+        today = g.current_date_str if hasattr(g, "current_date_str") else ""
+        cache_key = f"{stock}_{today}_{period}"
+        if not hasattr(g, "_atr_cache"):
+            g._atr_cache = {}
+        if cache_key in g._atr_cache:
+            return g._atr_cache[cache_key]
+        atr = PositionAgent.compute_atr(df, period)
+        g._atr_cache[cache_key] = atr
+        return atr
 
     @staticmethod
     def calc_profit_ratio_safely(pos):
@@ -2306,164 +1782,10 @@ class PositionAgent:
         """清理全局状态字典"""
         g._peak_prices.pop(stock, None)
         g._buy_prices.pop(stock, None)
-        if hasattr(g, "_holding_start_date"):
-            g._holding_start_date.pop(stock, None)
-        if hasattr(g, "_holding_scores"):
-            g._holding_scores.pop(stock, None)
-        if hasattr(g, "_holding_score_daily_cache"):
-            g._holding_score_daily_cache.pop(stock, None)
+        if hasattr(g, "_highest_close"):
+            g._highest_close.pop(stock, None)
         if stock in g._warning_state:
             del g._warning_state[stock]
-
-    @staticmethod
-    def get_holding_days(context, stock):
-        holding_start = getattr(g, "_holding_start_date", {}).get(stock)
-        if not holding_start:
-            return 0
-        try:
-            return max(0, (context.current_dt.date() - holding_start).days)
-        except Exception:
-            return 0
-
-    @staticmethod
-    def compute_holding_score(context, stock, pos):
-        details = {
-            "below_ma20": False,
-            "below_ma60": False,
-            "rs20_excess": 0.0,
-            "drawdown_from_peak": 0.0,
-        }
-        base_score = 50.0
-        try:
-            today_str = context.current_dt.strftime("%Y-%m-%d")
-            if not hasattr(g, "_holding_score_daily_cache"):
-                g._holding_score_daily_cache = {}
-            cached = g._holding_score_daily_cache.get(stock)
-            if cached and cached.get("date") == today_str:
-                return cached["score"], dict(cached["details"])
-
-            df = DataCache.get_daily_data(stock, 65)
-            if df is None or df.empty or len(df) < 20:
-                return base_score, details
-
-            close = float(df["close"].iloc[-1])
-            ma20_series = df["close"].rolling(20).mean()
-            ma20 = float(ma20_series.iloc[-1])
-            ma20_prev = float(ma20_series.iloc[-6]) if len(ma20_series.dropna()) >= 6 else ma20
-            ma30 = float(df["close"].rolling(30).mean().iloc[-1]) if len(df) >= 30 else ma20
-            ma60 = float(df["close"].rolling(60).mean().iloc[-1]) if len(df) >= 60 else ma30
-
-            details["below_ma20"] = close < ma20
-            details["below_ma60"] = close < ma60
-
-            trend_score = 0.0
-            if close > ma20:
-                trend_score += 12.0
-            if close > ma30:
-                trend_score += 8.0
-            if close > ma60:
-                trend_score += 8.0
-            if ma20 > ma20_prev:
-                trend_score += 12.0
-
-            df_index = DataCache.get_daily_data(ConfigManager.BENCHMARK_INDEX, 25)
-            rs_score = 10.0
-            if (
-                df_index is not None
-                and not df_index.empty
-                and len(df_index) >= 20
-                and len(df) >= 20
-            ):
-                stock_ret_20 = close / float(df["close"].iloc[-20]) - 1
-                index_ret_20 = float(df_index["close"].iloc[-1]) / float(df_index["close"].iloc[-20]) - 1
-                rs_excess = stock_ret_20 - index_ret_20
-                details["rs20_excess"] = rs_excess
-                rs_score = max(0.0, min(20.0, 10.0 + rs_excess * 100.0))
-
-            profit_ratio, _ = PositionAgent.calc_profit_ratio_safely(pos)
-            peak_price = getattr(g, "_peak_prices", {}).get(stock, close)
-            if peak_price and peak_price > 0:
-                drawdown_from_peak = max(0.0, (peak_price - close) / peak_price)
-            else:
-                drawdown_from_peak = 0.0
-            details["drawdown_from_peak"] = drawdown_from_peak
-
-            profit_score = 0.0
-            if profit_ratio is not None:
-                profit_score += max(0.0, min(10.0, profit_ratio * 50.0))
-            profit_score += max(0.0, 10.0 * (1.0 - min(drawdown_from_peak / 0.20, 1.0)))
-
-            recent_high = float(df["high"].iloc[-5:].max())
-            recent_low = float(df["low"].iloc[-5:].min())
-            amplitude = (recent_high - recent_low) / close if close > 0 else 0.0
-            stability_score = max(0.0, 20.0 * (1.0 - min(amplitude / 0.15, 1.0)))
-
-            score = max(0.0, min(100.0, trend_score + rs_score + profit_score + stability_score))
-            if not hasattr(g, "_holding_scores"):
-                g._holding_scores = {}
-            g._holding_scores[stock] = score
-            g._holding_score_daily_cache[stock] = {
-                "date": today_str,
-                "score": score,
-                "details": dict(details),
-            }
-            return score, details
-        except Exception as e:
-            log.debug(f"[持仓评分异常] {stock}: {e}")
-            return base_score, details
-
-    @staticmethod
-    def record_sell_reason(context, stock, reason, profit_ratio=None, extra=None):
-        if not ConfigManager.FEATURE_FLAGS.get("REPORT_ENHANCED", False):
-            return
-        if not hasattr(g, "_sell_reason_events"):
-            g._sell_reason_events = []
-        pos = context.portfolio.positions.get(stock)
-        holding_score = None
-        if pos is not None and pos.amount > 0:
-            holding_score, _ = PositionAgent.compute_holding_score(context, stock, pos)
-        g._sell_reason_events.append(
-            {
-                "date": context.current_dt.strftime("%Y-%m-%d"),
-                "time": context.current_dt.strftime("%H:%M:%S"),
-                "stock": stock,
-                "reason": reason,
-                "profit_ratio": profit_ratio if profit_ratio is not None else "",
-                "holding_days": PositionAgent.get_holding_days(context, stock),
-                "holding_score": round(holding_score, 2) if holding_score is not None else "",
-                "extra": extra or {},
-            }
-        )
-
-    @staticmethod
-    def compute_atr(df, period):
-        if df is None or df.empty or len(df) < period + 1:
-            return None
-        try:
-            high = df["high"]
-            low = df["low"]
-            prev_close = df["close"].shift(1)
-            tr = pd.concat(
-                [(high - low), (high - prev_close).abs(), (low - prev_close).abs()],
-                axis=1,
-            ).max(axis=1)
-            atr = tr.rolling(period).mean().iloc[-1]
-            if pd.isna(atr) or atr <= 0:
-                return None
-            return float(atr)
-        except Exception as e:
-            log.debug(f"[ATR计算异常] {e}")
-            return None
-
-    @staticmethod
-    def get_exit_stage(context, stock):
-        cfg = ConfigManager.EXIT_STAGE_V1
-        holding_days = PositionAgent.get_holding_days(context, stock)
-        if holding_days <= cfg.get("PROTECT_DAYS", 5):
-            return "protect", holding_days
-        if holding_days <= cfg.get("TREND_DAYS", 25):
-            return "trend", holding_days
-        return "decay", holding_days
 
     @staticmethod
     def check_intraday_exit(context):
@@ -2492,47 +1814,12 @@ class PositionAgent:
                 if holding_str == today_str:
                     continue
 
-            # ===== EXIT_STAGE_V1 保护期（优先于硬止损）=====
-            if ConfigManager.FEATURE_FLAGS.get("EXIT_STAGE_V1", False):
-                exit_cfg_early = ConfigManager.EXIT_STAGE_V1
-                stage_early, holding_days_early = PositionAgent.get_exit_stage(context, stock)
-                if stage_early == "protect":
-                    daily_df_early = DataCache.get_daily_data(
-                        stock, max(30, exit_cfg_early.get("ATR_PERIOD", 10) + 5)
-                    )
-                    atr_value_early = PositionAgent.compute_atr(
-                        daily_df_early, exit_cfg_early.get("ATR_PERIOD", 10)
-                    )
-                    if atr_value_early is not None:
-                        buy_price_early = PositionAgent.get_cost_price_safely(pos)
-                        if buy_price_early and buy_price_early > 0:
-                            profit_ratio_check, _ = PositionAgent.calc_profit_ratio_safely(pos)
-                            if profit_ratio_check is not None and profit_ratio_check < 0:
-                                atr_mult = exit_cfg_early.get("ATR_MULTIPLIER", 1.5)
-                                protect_threshold = -(atr_value_early * atr_mult / buy_price_early)
-                                if profit_ratio_check < protect_threshold:
-                                    protect_stop_price = buy_price_early - atr_value_early * atr_mult
-                                    PositionAgent.record_sell_reason(
-                                        context, stock, "atr_protect_stop", profit_ratio_check,
-                                        {"atr": round(atr_value_early, 4), "protect_stop": round(protect_stop_price, 4)},
-                                    )
-                                    order_target(stock, 0)
-                                    log.info(
-                                        f"♻️♻️♻️ [ATR保护] {stock}, 持仓{holding_days_early}天, "
-                                        f"亏损{profit_ratio_check*100:.2f}% < 保护线{-protect_threshold*100:.2f}%"
-                                    )
-                                    PositionAgent.cleanup_state(stock)
-                                    continue
-
             # ===== 保护机制0: 硬止损（优先级最高，解决2024年"冻死"问题）=====
             profit_ratio_early, _ = PositionAgent.calc_profit_ratio_safely(pos)
             if profit_ratio_early is not None:
                 hard_stop = ConfigManager.HARD_STOP
                 # 绝对止损：亏损超过-12%强制卖出
                 if profit_ratio_early < hard_stop["MAX_LOSS"]:
-                    PositionAgent.record_sell_reason(
-                        context, stock, "hard_stop", profit_ratio_early
-                    )
                     order_target(stock, 0)
                     log.info(
                         f"♻️♻️♻️ [硬止损] {stock}, 亏损{profit_ratio_early*100:.2f}% "
@@ -2544,9 +1831,6 @@ class PositionAgent:
                 if holding_start:
                     holding_days = (context.current_dt.date() - holding_start).days if hasattr(holding_start, "days") else (context.current_dt.date() - holding_start).days
                     if holding_days > hard_stop["TIME_STOP_DAYS"] and profit_ratio_early < hard_stop["TIME_STOP_LOSS"]:
-                        PositionAgent.record_sell_reason(
-                            context, stock, "time_stop", profit_ratio_early
-                        )
                         order_target(stock, 0)
                         log.info(
                             f"♻️♻️♻️ [时间止损] {stock}, 持仓{holding_days}天, "
@@ -2590,74 +1874,46 @@ class PositionAgent:
 
             peak_price = g._peak_prices[stock]
 
-            if ConfigManager.FEATURE_FLAGS.get("EXIT_STAGE_V1", False):
-                stage, holding_days = PositionAgent.get_exit_stage(context, stock)
-                exit_cfg = ConfigManager.EXIT_STAGE_V1
-                atr_period = exit_cfg.get("ATR_PERIOD", 10)
-                atr_multiplier = exit_cfg.get("ATR_MULTIPLIER", 2.2)
-                daily_df = df if freq == "daily" and len(df) >= atr_period + 1 else DataCache.get_daily_data(stock, max(30, atr_period + 5))
-                atr_value = PositionAgent.compute_atr(daily_df, atr_period)
+            # 更新持仓最高收盘价（ATR吊灯止损用）
+            if not hasattr(g, "_highest_close"):
+                g._highest_close = {}
+            if stock not in g._highest_close:
+                g._highest_close[stock] = close
+            else:
+                g._highest_close[stock] = max(g._highest_close[stock], close)
 
-                if stage == "protect" and atr_value is not None:
-                    buy_price = PositionAgent.get_cost_price_safely(pos)
-                    if buy_price and buy_price > 0:
-                        protect_stop = buy_price - atr_value * atr_multiplier
-                        if close < protect_stop and profit_ratio < 0:
-                            PositionAgent.record_sell_reason(
-                                context,
-                                stock,
-                                "atr_protect_stop",
-                                profit_ratio,
-                                {"atr": round(atr_value, 4), "protect_stop": round(protect_stop, 4)},
-                            )
-                            order_target(stock, 0)
-                            log.info(
-                                f"♻️♻️♻️ [ATR保护] {stock}, 持仓{holding_days}天, 现价{close:.2f} < 保护线{protect_stop:.2f}"
-                            )
-                            PositionAgent.cleanup_state(stock)
-                            continue
+            # ===== optimization_08: ATR吊灯止损 =====
+            atr_cfg = ConfigManager.ATR_CHANDELIER
+            atr_per = atr_cfg["ATR_PERIOD"] if mode != "trending_downtrend" else atr_cfg["DOWNTREND_ATR_PERIOD"]
+            atr_mul = (
+                atr_cfg["UPTREND_MULTIPLIER"] if mode == "trending_uptrend"
+                else (atr_cfg["SIDEWAYS_MULTIPLIER"] if mode == "sideways" else atr_cfg["DOWNTREND_MULTIPLIER"])
+            )
+            entry_th = (
+                atr_cfg["ENTRY_THRESHOLD_UPTREND"] if mode == "trending_uptrend"
+                else (atr_cfg["ENTRY_THRESHOLD_SIDEWAYS"] if mode == "sideways" else atr_cfg["ENTRY_THRESHOLD_DOWNTREND"])
+            )
 
-                if stage == "trend" and atr_value is not None:
-                    trailing_stop = peak_price - atr_value * atr_multiplier
-                    if close < trailing_stop:
-                        PositionAgent.record_sell_reason(
-                            context,
-                            stock,
-                            "atr_trend_stop",
-                            profit_ratio,
-                            {"atr": round(atr_value, 4), "trailing_stop": round(trailing_stop, 4)},
-                        )
-                        order_target(stock, 0)
-                        log.info(
-                            f"♻️♻️♻️ [ATR趋势保护] {stock}, 现价{close:.2f} < ATR跟踪线{trailing_stop:.2f}"
-                        )
-                        PositionAgent.cleanup_state(stock)
-                        continue
+            daily_df = DataCache.get_daily_data(stock, max(60, atr_per + 5))
+            atr_val = PositionAgent.compute_atr_cached(stock, daily_df, atr_per)
 
-                if stage == "decay":
-                    holding_score, details = PositionAgent.compute_holding_score(context, stock, pos)
-                    daily_decay_df = daily_df if daily_df is not None and not daily_df.empty else DataCache.get_daily_data(stock, 25)
-                    if daily_decay_df is not None and not daily_decay_df.empty and len(daily_decay_df) >= 20:
-                        ma20 = float(daily_decay_df["close"].rolling(20).mean().iloc[-1])
-                        below_ma20 = close < ma20
-                    else:
-                        below_ma20 = details.get("below_ma20", False)
-                    weak_score = holding_score < exit_cfg.get("WEAK_HOLDING_SCORE", 40.0)
-                    deep_loss = profit_ratio < exit_cfg.get("DECAY_LOSS_THRESHOLD", -0.03)
-                    if (weak_score or deep_loss) and below_ma20:
-                        PositionAgent.record_sell_reason(
-                            context,
-                            stock,
-                            "decay_exit",
-                            profit_ratio,
-                            {"holding_score": round(holding_score, 2), "stage": stage},
-                        )
-                        order_target(stock, 0)
-                        log.info(
-                            f"♻️♻️♻️ [衰退退出] {stock}, 持仓{holding_days}天, 评分{holding_score:.1f}, 盈亏{profit_ratio*100:.2f}%"
-                        )
-                        PositionAgent.cleanup_state(stock)
-                        continue
+            if atr_val is not None and cost_price and cost_price > 0:
+                highest_close = g._highest_close.get(stock, close)
+                atr_stop = highest_close - atr_val * atr_mul
+
+                if profit_ratio > atr_cfg["PROFIT_LOCK_30PCT"]["min_profit"]:
+                    atr_stop = max(atr_stop, cost_price * atr_cfg["PROFIT_LOCK_30PCT"]["floor"])
+                elif profit_ratio > atr_cfg["PROFIT_LOCK_15PCT"]["min_profit"]:
+                    atr_stop = max(atr_stop, cost_price * atr_cfg["PROFIT_LOCK_15PCT"]["floor"])
+
+                if profit_ratio * cost_price > entry_th * atr_val and close < atr_stop:
+                    order_target(stock, 0)
+                    log.info(
+                        f"[ATR吊灯-{mode}] {stock}, 现价{close:.2f} < 吊灯{atr_stop:.2f}"
+                        f"(最高{highest_close:.2f} ATR{atr_per}x{atr_mul}) 盈利{profit_ratio*100:.2f}%"
+                    )
+                    PositionAgent.cleanup_state(stock)
+                    continue
 
             # ===== 保护机制1: 峰值回撤保护（双模参数）=====
             max_drawdown = (
@@ -2668,13 +1924,6 @@ class PositionAgent:
             if profit_ratio > 0:
                 drawdown_from_peak = (peak_price - close) / peak_price
                 if drawdown_from_peak > max_drawdown:
-                    PositionAgent.record_sell_reason(
-                        context,
-                        stock,
-                        "peak_drawdown_stop",
-                        profit_ratio,
-                        {"drawdown_from_peak": round(drawdown_from_peak, 4)},
-                    )
                     order_target(stock, 0)
                     log.info(
                         f"♻️♻️♻️ [{mode}峰值回撤] {stock}, 回撤{drawdown_from_peak*100:.2f}% "
@@ -2699,9 +1948,6 @@ class PositionAgent:
                         recent_closes.iloc[i] < ma_recent.iloc[i]
                         for i in range(len(recent_closes))
                     ):
-                        PositionAgent.record_sell_reason(
-                            context, stock, f"ma_stop_confirm_{mode}", profit_ratio
-                        )
                         order_target(stock, 0)
                         log.info(
                             f"♻️♻️♻️ [{mode}止损-确认] {stock}, 现价{close:.2f} < MA{ma_period}{ma:.2f}, "
@@ -2710,9 +1956,6 @@ class PositionAgent:
                         PositionAgent.cleanup_state(stock)
                 else:
                     # 牛市/下降趋势：立即止损
-                    PositionAgent.record_sell_reason(
-                        context, stock, f"ma_stop_{mode}", profit_ratio
-                    )
                     order_target(stock, 0)
                     log.info(
                         f"♻️♻️♻️ [{mode}止损] {stock}, 价格{close:.2f}跌破MA{ma_period}({ma:.2f}), "
@@ -2741,13 +1984,6 @@ class PositionAgent:
                 locked_price = buy_price * (1 + locked_profit)
 
                 if close < locked_price and close < ma:
-                    PositionAgent.record_sell_reason(
-                        context,
-                        stock,
-                        f"breakeven_stop_{mode}",
-                        profit_ratio,
-                        {"locked_price": round(locked_price, 4)},
-                    )
                     order_target(stock, 0)
                     log.info(
                         f"♻️♻️♻️ [保本-{mode}] {stock}, 现价{close:.2f} < 保本线{locked_price:.2f}"
@@ -2766,13 +2002,6 @@ class PositionAgent:
                     context._trailing_peaks[stock] = close
                 peak = context._trailing_peaks.get(stock, 0)
                 if peak > 0 and close < peak * (1 - 0.15):
-                    PositionAgent.record_sell_reason(
-                        context,
-                        stock,
-                        "trailing_stop_uptrend",
-                        profit_ratio,
-                        {"trailing_peak": round(peak, 4)},
-                    )
                     order_target(stock, 0)
                     log.info(
                         f"♻️♻️♻️ [移动止盈] {stock}, 现价{close:.2f} < 峰值回撤线{peak*0.85:.2f}(峰值{peak:.2f}, 回撤{-((close/peak-1)*100):.2f}%)"
@@ -2816,13 +2045,6 @@ class PositionAgent:
             if l1["PROFIT"] <= profit_ratio < config["L2"]["PROFIT"]:
                 sell_value = current_value * l1["SELL_RATIO"]
                 if sell_value >= min_sell_value:
-                    PositionAgent.record_sell_reason(
-                        context,
-                        stock,
-                        f"take_profit_l1_{mode}",
-                        profit_ratio,
-                        {"partial": True, "sell_value": round(sell_value, 2)},
-                    )
                     order_value(stock, -sell_value)
                     log.info(
                         f"♻️♻️♻️ [止盈-L1-{mode}] {stock}, 盈利{profit_ratio*100:.2f}%, "
@@ -2838,13 +2060,6 @@ class PositionAgent:
             elif profit_ratio >= config["L2"]["PROFIT"]:
                 sell_value = current_value * config["L2"]["SELL_RATIO"]
                 if sell_value >= min_sell_value:
-                    PositionAgent.record_sell_reason(
-                        context,
-                        stock,
-                        f"take_profit_l2_{mode}",
-                        profit_ratio,
-                        {"partial": True, "sell_value": round(sell_value, 2)},
-                    )
                     order_value(stock, -sell_value)
                     log.info(
                         f"♻️♻️♻️ [止盈-L2-{mode}] {stock}, 盈利{profit_ratio*100:.2f}%, "
@@ -2870,8 +2085,6 @@ class ReportAgent:
     LINE_SEP = "-" * 135
     STAR_SEP = "*" * 135
 
-    _run_id = None  # 本轮 run_id，用于增强报表文件名隔离并行回测
-
     POS_HW = {
         "股票代码": 10, "股票名称": 13, "当日盈亏": 13, "累计盈亏": 13,
         "持仓市值": 14, "浮动盈亏": 14, "持股数量": 11, "持股天数": 11,
@@ -2892,121 +2105,6 @@ class ReportAgent:
         "期末价": 9, "价格变动": 9, "涨跌幅": 10, "盈利次数": 10,
         "亏损次数": 10, "盈利金额": 12, "亏损金额": 12, "手续费": 10, "盈亏统计": 12,
     }
-
-    @staticmethod
-    def clear_report_files():
-        for fname in [
-            "sell_reason_report.csv",
-            "rotation_report.csv",
-            "candidate_quality_report.csv",
-        ]:
-            path = Common.get_log_path(fname)
-            if os.path.exists(path):
-                os.remove(path)
-
-    @staticmethod
-    def _append_csv_rows(filename, header, rows):
-        if not rows:
-            return
-        if ReportAgent._run_id:
-            base, ext = filename.rsplit(".", 1)
-            filename = f"{base}_{ReportAgent._run_id}.{ext}"
-        Common.safe_append_file(
-            filename,
-            "\n".join(rows) + "\n",
-            header=header + "\n",
-            encoding="utf-8",
-        )
-
-    @staticmethod
-    def generate_sell_reason_report(context):
-        events = getattr(g, "_sell_reason_events", [])
-        today = context.current_dt.strftime("%Y-%m-%d")
-        rows = []
-        for item in events:
-            if item.get("date") != today:
-                continue
-            extra = item.get("extra", {})
-            rows.append(
-                "{date},{time},{stock},{reason},{holding_days},{profit_ratio},{holding_score},{extra}".format(
-                    date=item.get("date", ""),
-                    time=item.get("time", ""),
-                    stock=item.get("stock", ""),
-                    reason=item.get("reason", ""),
-                    holding_days=item.get("holding_days", ""),
-                    profit_ratio=item.get("profit_ratio", ""),
-                    holding_score=item.get("holding_score", ""),
-                    extra=str(extra).replace(",", ";"),
-                )
-            )
-        ReportAgent._append_csv_rows(
-            "sell_reason_report.csv",
-            "date,time,stock,reason,holding_days,profit_ratio,holding_score,extra",
-            rows,
-        )
-
-    @staticmethod
-    def generate_rotation_report(context):
-        events = getattr(g, "_rotation_events", [])
-        today = context.current_dt.strftime("%Y-%m-%d")
-        rows = []
-        for item in events:
-            if item.get("date") != today:
-                continue
-            rows.append(
-                "{date},{time},{old_stock},{new_stock},{old_profit_ratio:.6f},{old_holding_score:.2f},{new_entry_score:.2f},{score_delta:.2f},{holding_days}".format(
-                    date=item.get("date", ""),
-                    time=item.get("time", ""),
-                    old_stock=item.get("old_stock", ""),
-                    new_stock=item.get("new_stock", ""),
-                    old_profit_ratio=float(item.get("old_profit_ratio", 0.0)),
-                    old_holding_score=float(item.get("old_holding_score", 0.0)),
-                    new_entry_score=float(item.get("new_entry_score", 0.0)),
-                    score_delta=float(item.get("score_delta", 0.0)),
-                    holding_days=item.get("holding_days", 0),
-                )
-            )
-        ReportAgent._append_csv_rows(
-            "rotation_report.csv",
-            "date,time,old_stock,new_stock,old_profit_ratio,old_holding_score,new_entry_score,score_delta,holding_days",
-            rows,
-        )
-
-    @staticmethod
-    def generate_candidate_quality_report(context):
-        events = getattr(g, "_candidate_quality_history", [])
-        today = context.current_dt.strftime("%Y-%m-%d")
-        rows = []
-        for item in events:
-            if item.get("date") != today:
-                continue
-            rows.append(
-                "{date},{mode},{candidate_count},{selected_count},{s_count},{a_count},{b_count},{b_by_2of4},{b_by_3of4},{top1_score:.3f},{top2_score:.3f},{top3_score:.3f},{top1_base_score:.3f},{top2_base_score:.3f},{top3_base_score:.3f},{quality_gap_triggered},{quality_gap_skip},{selected_symbols}".format(
-                    date=item.get("date", ""),
-                    mode=item.get("mode", ""),
-                    candidate_count=item.get("candidate_count", 0),
-                    selected_count=item.get("selected_count", 0),
-                    s_count=item.get("s_count", 0),
-                    a_count=item.get("a_count", 0),
-                    b_count=item.get("b_count", 0),
-                    b_by_2of4=item.get("b_by_2of4", 0),
-                    b_by_3of4=item.get("b_by_3of4", 0),
-                    top1_score=float(item.get("top1_score", 0.0)),
-                    top2_score=float(item.get("top2_score", 0.0)),
-                    top3_score=float(item.get("top3_score", 0.0)),
-                    top1_base_score=float(item.get("top1_base_score", 0.0)),
-                    top2_base_score=float(item.get("top2_base_score", 0.0)),
-                    top3_base_score=float(item.get("top3_base_score", 0.0)),
-                    quality_gap_triggered=item.get("quality_gap_triggered", 0),
-                    quality_gap_skip=item.get("quality_gap_skip", 0),
-                    selected_symbols=item.get("selected_symbols", ""),
-                )
-            )
-        ReportAgent._append_csv_rows(
-            "candidate_quality_report.csv",
-            "date,mode,candidate_count,selected_count,s_count,a_count,b_count,b_by_2of4,b_by_3of4,top1_score,top2_score,top3_score,top1_base_score,top2_base_score,top3_base_score,quality_gap_triggered,quality_gap_skip,selected_symbols",
-            rows,
-        )
 
     @staticmethod
     def generate_daily_reports(context):
@@ -3371,9 +2469,6 @@ class ReportAgent:
 
 def initialize(context):
     """策略初始化"""
-    # optimization_06 配置预设切换（环境变量 OPTIMIZATION_06_PRESET）
-    ConfigManager.apply_opt06_preset()
-
     g.security = ConfigManager.BENCHMARK_INDEX
     set_universe(g.security)
 
@@ -3392,26 +2487,6 @@ def initialize(context):
     # 交易跟踪（盘后报表用）
     g._trade_history = []  # 交易历史
     g._traded_stocks = set()  # 所有交易过的股票
-    g._holding_scores = {}
-    g._holding_score_daily_cache = {}
-    g._sell_reason_events = []
-    g._rotation_events = []
-    g._candidate_quality_history = []
-    g._entry_candidate_streaks = {}
-    g._entry_candidate_streaks_date = ""
-    g._sold_stock_cooldown = {}
-    g._daily_rotation_count = 0
-    g._holding_grades = {}  # Phase 1B: 持仓股票的等级记录
-    g._a2_active = False  # A2 候选弹性恢复标志
-
-    # 增强报表隔离：每次回测启动前清空累积文件，生成唯一 run_id 隔离并行回测
-    if ConfigManager.FEATURE_FLAGS.get("REPORT_ENHANCED", False):
-        ReportAgent.clear_report_files()
-        start_str = context.current_dt.strftime("%y%m%d")
-        ts = datetime.datetime.now().strftime("%y%m%d_%H%M%S")
-        pid_part = os.getpid()
-        rand_part = os.urandom(2).hex()
-        ReportAgent._run_id = f"{start_str}_{ts}_{pid_part}_{rand_part}"
 
     # 尝试加载缓存
     DataCache.load_pkl_cache()
@@ -3422,8 +2497,7 @@ def initialize(context):
 def before_trading_start(context, data):
     """开盘前准备"""
     g.current_date_str = context.current_dt.strftime("%Y-%m-%d")
-    g._daily_rotation_count = 0
-    g._holding_score_daily_cache = {}
+    g._atr_cache = {}
 
     DataCache.clear_old_cache(g.current_date_str)
 
@@ -3469,8 +2543,8 @@ def handle_data(context, data):
         else:
             log.debug(f"[早盘跳过] 当前模式={mode}, 早盘入场已禁用")
 
-    # 2. 盘中风控 (每15分钟执行一次MA20跟踪止损检查)
-    if m % 15 == 0 and (
+    # 2. 盘中风控 (每30分钟执行一次MA20跟踪止损检查, opt08)
+    if m % 30 == 0 and (
         (h == 9 and m >= 30) or (h >= 10 and h < 14) or (h == 14 and m <= 30)
     ):
         PositionAgent.check_intraday_exit(context)
@@ -3552,13 +2626,8 @@ def after_trading_end(context, data):
 
     # 生成盘后报表
     try:
-        if ConfigManager.FEATURE_FLAGS.get("VERBOSE_DAILY_REPORTS", False):
-            ReportAgent.generate_daily_reports(context)
-            ReportAgent.generate_profit_loss_report(context)
-        if ConfigManager.FEATURE_FLAGS.get("REPORT_ENHANCED", False):
-            ReportAgent.generate_sell_reason_report(context)
-            ReportAgent.generate_rotation_report(context)
-            ReportAgent.generate_candidate_quality_report(context)
+        ReportAgent.generate_daily_reports(context)
+        ReportAgent.generate_profit_loss_report(context)
     except Exception as e:
         log.warning("[盘后流程] 生成报表失败: {}".format(e))
 
@@ -3569,30 +2638,18 @@ def after_trading_end(context, data):
             context.portfolio.portfolio_value,
             context.portfolio.positions_value,
         )
-        Common.safe_append_file(
-            "daily_pnl_report.csv",
-            report_line,
-            header="Date,TotalValue,PositionValue\n",
-            encoding="utf-8",
-        )
+        content = Common.safe_read_file("daily_pnl_report.csv")
+        if not content:
+            content = "Date,TotalValue,PositionValue\n"
+        if isinstance(content, bytes):
+            content = content.decode("utf-8")
+        content += report_line
+        Common.safe_write_file("daily_pnl_report.csv", content)
     except Exception as e:
         log.warning("更新盈亏报表 CSV 失败: {}".format(e))
 
     # 保存缓存
     DataCache.save_pkl_cache()
-    today = context.current_dt.strftime("%Y-%m-%d")
-    if hasattr(g, "_sell_reason_events"):
-        g._sell_reason_events = [
-            item for item in g._sell_reason_events if item.get("date") != today
-        ]
-    if hasattr(g, "_rotation_events"):
-        g._rotation_events = [
-            item for item in g._rotation_events if item.get("date") != today
-        ]
-    if hasattr(g, "_candidate_quality_history"):
-        g._candidate_quality_history = [
-            item for item in g._candidate_quality_history if item.get("date") != today
-        ]
     log.info("[盘后流程] 执行完成")
     print("\n\n")
 
@@ -3695,12 +2752,17 @@ def on_trade_response(context, trade_list):
         record_line = f"{date_str},{time_str},{stock},{action_str},-,{abs(amount):.3f},{price:.3f},{commission:.3f}\n"
 
         try:
-            Common.safe_append_file(
-                "交易详情_trends_up.csv",
-                record_line,
-                header="日期,时间,合约代码,买/卖,开/平,成交量,成交价,手续费\n",
-                encoding="gbk",
-            )
+            content = Common.safe_read_file("交易详情_trends_up.csv")
+            if not content:
+                content = "日期,时间,合约代码,买/卖,开/平,成交量,成交价,手续费\n"
+            if isinstance(content, bytes):
+                try:
+                    content = content.decode("gbk")
+                except:
+                    content = content.decode("utf-8")
+
+            content += record_line
+            Common.safe_write_file("交易详情_trends_up.csv", content.encode("gbk"))
             log.info(
                 "🔔🔔🔔 [成交回报]  {} {} {}  价格={:.2f}  数量={:.0f}  手续费={:.2f}".format(
                     stock, action_str, status_str, price, abs(amount), commission

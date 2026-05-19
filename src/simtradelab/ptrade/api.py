@@ -1445,11 +1445,11 @@ class PtradeAPI:
             self.log.warning(t("api.get_history_empty", stocks=security_list, count=count, frequency=frequency, fq=fq))
             final_result = {} if is_dict else pd.DataFrame()
         elif is_dict:
-            # 兼容历史测试契约：{stock: {field: ndarray}}
+            # optimization_08: {stock: DataFrame} — 跨平台一致性
             final_result = OrderedDict()
             for stock in stocks:
                 if stock in result:
-                    final_result[stock] = result[stock]
+                    final_result[stock] = pd.DataFrame(result[stock])
         else:
             is_single_stock = isinstance(security_list, str)
             stocks_list = [security_list] if is_single_stock else stocks
