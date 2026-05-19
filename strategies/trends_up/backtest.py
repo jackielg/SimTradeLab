@@ -236,6 +236,45 @@ class Common:
 
 
 # ==========================================
+# 2b. Debug: PTrade 对比诊断日志 (SIMTRADE_DEBUG=1 启用)
+# ==========================================
+class Debug:
+    """PTrade兼容诊断日志: log.info 输出市值过滤/选股/买入全流程数据。
+       本地和PTrade通用。提交PTrade前设置 SIMTRADE_DEBUG=False。"""
+    SIMTRADE_DEBUG = True  # ← 提交PTrade前改为False
+    _date = ""
+
+    @staticmethod
+    def init_date(date_str):
+        Debug._date = date_str
+
+    @staticmethod
+    def log_cap(stock, total_value, float_value, close, total_shares, a_floats, passed, reason=""):
+        if not Debug.SIMTRADE_DEBUG:
+            return
+        log.info(f"[DEBUG_CAP] {Debug._date},{stock},{total_value:.0f},{float_value:.0f},"
+                 f"{close:.2f},{total_shares:.0f},{a_floats:.0f},{1 if passed else 0},{reason}")
+
+    @staticmethod
+    def log_candidate(stock, grade, base_score, entry_score, met_count, mode):
+        if not Debug.SIMTRADE_DEBUG:
+            return
+        log.info(f"[DEBUG_CANDIDATE] {Debug._date},{stock},{grade},{base_score:.4f},"
+                 f"{entry_score:.4f},{met_count},{mode}")
+
+    @staticmethod
+    def log_buy(stock, grade, amount, score, day_change=None):
+        if not Debug.SIMTRADE_DEBUG:
+            return
+        dc_str = f"{day_change:.4f}" if day_change is not None else ""
+        log.info(f"[DEBUG_BUY] {Debug._date},{stock},{grade},{amount:.0f},{score:.4f},{dc_str}")
+
+    @staticmethod
+    def flush():
+        pass  # log.info 已实时输出，无需额外 flush
+
+
+# ==========================================
 # 3. DataCache: 数据缓存机制与接口封装
 # ==========================================
 class DataCache:
@@ -669,6 +708,15 @@ class SelectionAgent:
             step3_candidates, step3_stats = (
                 SelectionAgent._filter_cap_vectorized(val_df, step3_stats)
             )
+            # Debug: 每只股票的市值和过滤结果
+            if Debug.SIMTRADE_DEBUG:
+                passed_set = set(step3_candidates)
+                for stock in val_df.index:
+                    tv = float(val_df.loc[stock, "total_value"]) if stock in val_df.index else 0
+                    fv = float(val_df.loc[stock, "float_value"]) if stock in val_df.index else 0
+                    Debug.log_cap(stock, tv, fv, 0, 0, 0,
+                                  stock in passed_set,
+                                  "PASS" if stock in passed_set else "FILTERED")
             return step3_candidates, 0, step3_stats
 
         # === SimTradeLab 回退路径：向量化获取股本+市值数据 ===
@@ -850,6 +898,11 @@ class SelectionAgent:
         final_min_abs = min(cap_p20, abs_min)
         final_max = min(cap_p80, abs_max * 1.5)
         max_float = ConfigManager.FILTER_CAPITAL["MAX_FLOAT_CAPITAL"]
+
+        if Debug.SIMTRADE_DEBUG:
+            log.info(f"[DEBUG_FILTER] cap_p20={cap_p20/1e8:.1f}亿 cap_p80={cap_p80/1e8:.1f}亿 "
+                     f"final_min={final_min/1e8:.1f}亿 final_max={final_max/1e8:.1f}亿 "
+                     f"final_min_abs={final_min_abs/1e8:.1f}亿 max_float={max_float/1e8:.1f}亿")
 
         mask = (
             (total_values >= final_min)
@@ -1202,6 +1255,11 @@ class SelectionAgent:
             max_positions_daily,
         )
 
+        # Debug: 输出所有 candidate
+        if Debug.SIMTRADE_DEBUG:
+            for stock, final_score, grade in scored_stocks[:top_n]:
+                Debug.log_candidate(stock, grade, 0, final_score, 0, mode)
+
         return scored_stocks[:top_n]
 
     @staticmethod
@@ -1395,6 +1453,12 @@ class ExecutionAgent:
                         )
 
                 order_value(stock, cash_per_stock)
+                if Debug.SIMTRADE_DEBUG:
+                    try:
+                        dc = ExecutionAgent._get_day_change(stock)
+                    except Exception:
+                        dc = None
+                    Debug.log_buy(stock, grade, int(cash_per_stock), score, dc)
                 log.info(
                     f"🚀🚀🚀 [买入][{grade}级] {stock}, 金额: {cash_per_stock:.0f}, 得分: {score:.3f}"
                 )
@@ -2492,12 +2556,15 @@ def initialize(context):
     DataCache.load_pkl_cache()
 
     log.info("策略 trends_up 初始化完成。")
+    if Debug.SIMTRADE_DEBUG:
+        log.info("[DEBUG] SIMTRADE_DEBUG=ON — 市值/选股/买入诊断日志已启用")
 
 
 def before_trading_start(context, data):
     """开盘前准备"""
     g.current_date_str = context.current_dt.strftime("%Y-%m-%d")
     g._atr_cache = {}
+    Debug.init_date(g.current_date_str)
 
     DataCache.clear_old_cache(g.current_date_str)
 
@@ -2649,6 +2716,7 @@ def after_trading_end(context, data):
         log.warning("更新盈亏报表 CSV 失败: {}".format(e))
 
     # 保存缓存
+    Debug.flush()
     DataCache.save_pkl_cache()
     log.info("[盘后流程] 执行完成")
     print("\n\n")
